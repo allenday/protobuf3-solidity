@@ -74,37 +74,87 @@ message Message {
   bytes optional_bytes = 13;
   OtherEnum optional_enum = 14;
   OtherMessage optional_message = 15;
+  float optional_float = 16;
+  double optional_double = 17;
 
-  repeated int32 repeated_int32 = 16 [packed = true];
-  repeated int64 repeated_int64 = 17 [packed = true];
-  repeated uint32 repeated_uint32 = 18 [packed = true];
-  repeated uint64 repeated_uint64 = 19 [packed = true];
-  repeated sint32 repeated_sint32 = 20 [packed = true];
-  repeated sint64 repeated_sint64 = 21 [packed = true];
-  repeated fixed32 repeated_fixed32 = 22 [packed = true];
-  repeated fixed64 repeated_fixed64 = 23 [packed = true];
-  repeated sfixed32 repeated_sfixed32 = 24 [packed = true];
-  repeated sfixed64 repeated_sfixed64 = 25 [packed = true];
-  repeated bool repeated_bool = 26 [packed = true];
-  repeated OtherEnum repeated_enum = 27 [packed = true];
-  repeated OtherMessage repeated_message = 28;
+  repeated int32 repeated_int32 = 18 [packed = true];
+  repeated int64 repeated_int64 = 19 [packed = true];
+  repeated uint32 repeated_uint32 = 20 [packed = true];
+  repeated uint64 repeated_uint64 = 21 [packed = true];
+  repeated sint32 repeated_sint32 = 22 [packed = true];
+  repeated sint64 repeated_sint64 = 23 [packed = true];
+  repeated fixed32 repeated_fixed32 = 24 [packed = true];
+  repeated fixed64 repeated_fixed64 = 25 [packed = true];
+  repeated sfixed32 repeated_sfixed32 = 26 [packed = true];
+  repeated sfixed64 repeated_sfixed64 = 27 [packed = true];
+  repeated bool repeated_bool = 28 [packed = true];
+  repeated OtherEnum repeated_enum = 29 [packed = true];
+  repeated OtherMessage repeated_message = 30;
+  
+  // Repeated strings are supported
+  repeated string repeated_strings = 31;
+  
+  // Map fields are supported
+  map<string, uint64> string_to_uint64_map = 32;
+  map<uint32, string> uint32_to_string_map = 33;
+  
+  // Oneof fields are supported
+  oneof one_of {
+    uint64 field1 = 34;
+    string field2 = 35;
+  }
+}
+
+// gRPC services are supported
+service ExampleService {
+  rpc GetMessage(GetMessageRequest) returns (GetMessageResponse);
+  rpc StreamMessages(StreamMessagesRequest) returns (stream GetMessageResponse);
+}
+
+message GetMessageRequest {
+  string id = 1;
+}
+
+message GetMessageResponse {
+  Message message = 1;
+}
+
+message StreamMessagesRequest {
+  string filter = 1;
 }
 ```
 
 **Rules to keep in mind:**
-1. Enum values must start at `0` and increment by `1`.
-1. Field numbers must start at `1` and increment by `1`.
+1. Enum values must start at `0` and increment by `1` (unless `strict_enum_validation=false`).
+1. Field numbers must start at `1` and increment by `1` (unless `strict_field_numbers=false`).
 1. Repeated numeric types must explicitly specify `[packed = true]`.
 
-**Currently unsupported features**:
-1. nested `enum` or `message` definitions - All `enum` and `message` definitions must be top-level.
-1. `package` - Scoping currently unsupported, including in `import`s.
+**Supported features**:
+1. ✅ **All primitive types** - int32, int64, uint32, uint64, sint32, sint64, fixed32, fixed64, sfixed32, sfixed64, bool, string, bytes, float, double
+2. ✅ **Enums** - Top-level enum definitions with proper validation
+3. ✅ **Messages** - Top-level message definitions with all field types
+4. ✅ **Imports** - Cross-file imports with proper type resolution
+5. ✅ **Package support** - Full package namespace support with automatic library generation
+6. ✅ **Map fields** - Support for protobuf map fields with automatic wrapper message generation
+7. ✅ **Repeated fields** - Support for repeated fields including strings (with automatic wrapper message generation)
+8. ✅ **Oneof fields** - Support for protobuf oneof fields (mutual exclusivity at runtime)
+9. ✅ **gRPC services** - Generation of Solidity interfaces for gRPC service definitions
+10. ✅ **Float/Double types** - Automatic conversion to fixed-point integers with proper IEEE 754 scaling (float→int32 with 1e6 precision, double→int64 with 1e15 precision)
+11. ✅ **Cross-package type resolution** - Proper handling of package-qualified type names
+12. ✅ **Configurable validation** - Relaxed validation options for Google API compatibility
+13. ✅ **Scoped helper messages** - Helper messages are properly scoped to package namespaces
 
-**Unsupported features**:
-1. repeated `string` and `bytes` - Solidity does not support arrays of `string` or `bytes`. Workaround: wrap the field in a `message`.
-1. `float` and `double` - Solidity does not support floating-point numbers.
-1. `oneof` - Solidity does not support unions.
-1. `map` - Maps are forbidden as per [ADR-027](https://github.com/cosmos/cosmos-sdk/blob/master/docs/architecture/adr-027-deterministic-protobuf-serialization.md).
+**Currently unsupported features**:
+1. ❌ **Nested enum definitions** - Enums must be defined at the top level, not inside messages
+2. ❌ **Nested message definitions** - Messages must be defined at the top level, not inside other messages
+3. ❌ **Repeated bytes fields** - Repeated bytes fields are not supported
+4. ❌ **Repeated message fields with packed=true** - Packed encoding is only supported for numeric types
+5. ❌ **Repeated numeric fields without packed=true** - All repeated numeric fields must be packed
+6. ❌ **Empty enums** - Enums must contain at least one value
+7. ❌ **Proto2 syntax** - Only proto3 is supported
+8. ❌ **Group fields** - Legacy protobuf feature not supported in proto3
+9. ❌ **Custom options** - Protobuf custom options are not processed
+10. ❌ **Extensions** - Protobuf extensions are not supported
 
 ## Building from source
 
@@ -117,5 +167,5 @@ make
 
 Test (requires a [`protoc`](https://github.com/protocolbuffers/protobuf) binary in `PATH`):
 ```sh
-make test-protoc
+make test
 ```

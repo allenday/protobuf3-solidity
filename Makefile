@@ -4,7 +4,8 @@ GOTEST := $(GO) test
 PROTOC := protoc
 BIN_DIR := bin
 
-LDFLAGS := -ldflags "-X main.version=$(shell git describe --tags)"
+#LDFLAGS := -ldflags "-X main.version=$(shell git describe --tags)"
+LDFLAGS := -ldflags "-X main.version=v0.1.0-dev"
 
 TARGET_GEN_SOL := protoc-gen-sol
 TARGETS := $(TARGET_GEN_SOL)
@@ -13,6 +14,8 @@ TESTS_PASSING := $(sort $(wildcard test/pass/*))
 TESTS_FAILING := $(sort $(wildcard test/fail/*))
 
 all: build test
+
+test: test-go test-protoc test-protoc-check
 
 build: $(TARGETS)
 
