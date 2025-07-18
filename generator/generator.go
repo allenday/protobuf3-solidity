@@ -3,6 +3,7 @@ package generator
 import (
 	"errors"
 	"fmt"
+	"log"
 	"path/filepath"
 	"strings"
 
@@ -73,6 +74,15 @@ type Generator struct {
 	licenseString string
 	compileFlag   compileFlag
 	generateFlag  generateFlag
+	
+	// Enhanced features for PostFiat support
+	helperMessages map[string]map[string]*descriptorpb.DescriptorProto // package -> message name -> descriptor
+	// Track map field type mappings: original type name -> wrapper name
+	mapFieldMappings map[string]string
+	
+	// Configuration options
+	strictFieldNumberValidation bool
+	strictEnumValidation       bool
 }
 
 // New initializes a new Generator.
@@ -81,12 +91,18 @@ func New(request *pluginpb.CodeGeneratorRequest, versionString string) *Generato
 
 	g.request = request
 	g.enumMaxes = make(map[string]int)
+	g.helperMessages = make(map[string]map[string]*descriptorpb.DescriptorProto)
+	g.mapFieldMappings = make(map[string]string)
 
 	g.versionString = versionString
 	g.licenseString = "CC0"
 
 	g.compileFlag = compileFlagCompile
 	g.generateFlag = generateFlagDecoder
+	
+	// Default configuration
+	g.strictFieldNumberValidation = true
+	g.strictEnumValidation = true
 
 	return g
 }
@@ -123,6 +139,22 @@ func (g *Generator) ParseParameters() error {
 				return err
 			}
 			g.generateFlag = flag
+		case "strict_field_numbers":
+			if value == "false" {
+				g.strictFieldNumberValidation = false
+			} else if value == "true" {
+				g.strictFieldNumberValidation = true
+			} else {
+				return errors.New("strict_field_numbers must be 'true' or 'false'")
+			}
+		case "strict_enum_validation":
+			if value == "false" {
+				g.strictEnumValidation = false
+			} else if value == "true" {
+				g.strictEnumValidation = true
+			} else {
+				return errors.New("strict_enum_validation must be 'true' or 'false'")
+			}
 		default:
 			return errors.New("unrecognized option " + key)
 		}
@@ -136,29 +168,78 @@ func (g *Generator) Generate() (*pluginpb.CodeGeneratorResponse, error) {
 	response := &pluginpb.CodeGeneratorResponse{}
 
 	protoFiles := g.request.GetProtoFile()
-	for _, protoFile := range protoFiles {
+	fileToGenerateSet := make(map[string]struct{})
+	for _, fname := range g.request.GetFileToGenerate() {
+		fileToGenerateSet[fname] = struct{}{}
+	}
+
+	// Build a global registry of all messages for type resolution
+	g.buildGlobalMessageRegistry(protoFiles)
+
+	log.Printf("DEBUG: Processing %d proto files", len(protoFiles))
+	for i, protoFile := range protoFiles {
+		if _, ok := fileToGenerateSet[protoFile.GetName()]; !ok {
+			log.Printf("DEBUG: Skipping file %d: %s (not in FileToGenerate)", i, protoFile.GetName())
+			continue
+		}
+		log.Printf("DEBUG: File %d: %s (package: %s, messages: %d)", i, protoFile.GetName(), protoFile.GetPackage(), len(protoFile.GetMessageType()))
+		for j, msg := range protoFile.GetMessageType() {
+			log.Printf("DEBUG:   Message %d: %s (%d fields)", j, msg.GetName(), len(msg.GetField()))
+		}
+		log.Printf("DEBUG: About to process file %d: %s", i, protoFile.GetName())
 		responseFile, err := g.generateFile(protoFile)
 		if err != nil {
+			log.Printf("ERROR: Failed to process file %d (%s): %v", i, protoFile.GetName(), err)
 			return nil, err
 		}
 
-		response.File = append(response.File, responseFile)
+		if responseFile != nil {
+			log.Printf("DEBUG: Successfully generated file for %s", protoFile.GetName())
+			response.File = append(response.File, responseFile)
+		} else {
+			log.Printf("DEBUG: Skipped file %s (no output generated)", protoFile.GetName())
+		}
 	}
 
 	return response, nil
 }
 
+// buildGlobalMessageRegistry builds a registry of all messages for type resolution
+func (g *Generator) buildGlobalMessageRegistry(protoFiles []*descriptorpb.FileDescriptorProto) {
+	if g.helperMessages == nil {
+		g.helperMessages = make(map[string]map[string]*descriptorpb.DescriptorProto)
+	}
+	for _, protoFile := range protoFiles {
+		pkg := protoFile.GetPackage()
+		if _, ok := g.helperMessages[pkg]; !ok {
+			g.helperMessages[pkg] = make(map[string]*descriptorpb.DescriptorProto)
+		}
+		for _, msg := range protoFile.GetMessageType() {
+			g.helperMessages[pkg][msg.GetName()] = msg
+		}
+	}
+}
+
 // generateFile generates Solidity code from a single .proto file.
 func (g *Generator) generateFile(protoFile *descriptorpb.FileDescriptorProto) (*pluginpb.CodeGeneratorResponse_File, error) {
-	// Only support proto3
-	err := checkSyntaxVersion(protoFile.GetSyntax())
-	if err != nil {
-		return nil, err
+	// Skip Google protobuf standard library files and Google API files
+	// (they use proto2 or have complex nested structures)
+	fileName := protoFile.GetName()
+	if strings.HasPrefix(fileName, "google/protobuf/") || strings.HasPrefix(fileName, "google/api/") {
+		// Skip these files as they are part of the Google standard library
+		// and may use proto2 syntax or have complex nested structures
+		return nil, nil
 	}
-
-	// Forbid package declaration
-	if len(protoFile.GetPackage()) > 0 {
-		return nil, errors.New("package declaration forbidden: " + protoFile.GetPackage())
+	
+	// Only support proto3
+	syntax := protoFile.GetSyntax()
+	if len(syntax) == 0 {
+		return nil, fmt.Errorf("file %s has no syntax declaration", fileName)
+	}
+	
+	err := checkSyntaxVersion(syntax)
+	if err != nil {
+		return nil, fmt.Errorf("file %s: %v", fileName, err)
 	}
 
 	// Buffer to hold the generate file's text
@@ -171,10 +252,24 @@ func (g *Generator) generateFile(protoFile *descriptorpb.FileDescriptorProto) (*
 	b.P(SolidityABIString)
 	b.P()
 
+	// Handle package namespace
+	packageName := protoFile.GetPackage()
+	if len(packageName) > 0 {
+		// Generate package namespace
+		b.P(fmt.Sprintf("// Package: %s", packageName))
+		b.P(fmt.Sprintf("library %s {", g.packageToLibraryName(packageName)))
+		b.P()
+		b.Indent()
+	}
+
 	// Generate imports
 	b.P("import \"@lazyledger/protobuf3-solidity-lib/contracts/ProtobufLib.sol\";")
+	
+	// Generate imports for dependencies
 	for _, dependency := range protoFile.GetDependency() {
-		b.P(fmt.Sprintf("import \"./%s.sol\";", dependency))
+		// Convert dependency path to import path
+		importPath := g.dependencyToImportPath(dependency)
+		b.P(fmt.Sprintf("import \"%s\";", importPath))
 	}
 	b.P()
 
@@ -188,162 +283,84 @@ func (g *Generator) generateFile(protoFile *descriptorpb.FileDescriptorProto) (*
 
 	// Generate messages
 	for _, descriptor := range protoFile.GetMessageType() {
-		err := g.generateMessage(descriptor, b)
+		// Debug: Print message name and field count
+		log.Printf("DEBUG: Processing message '%s' with %d fields", descriptor.GetName(), len(descriptor.GetField()))
+		
+		err := g.generateMessage(descriptor, packageName, b)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	responseFile := &pluginpb.CodeGeneratorResponse_File{
-		Name:    proto.String(filepath.Base(protoFile.GetName()) + ".sol"),
+	// PostFiat enhancement: Generate helper messages for maps and repeated strings
+	if len(g.helperMessages) > 0 {
+		b.P("// Helper messages for PostFiat enhancements")
+		b.P()
+		
+		// Get the current package name
+		if packageMessages, exists := g.helperMessages[packageName]; exists {
+			for _, wrapperDescriptor := range packageMessages {
+				err := g.generateMessage(wrapperDescriptor, packageName, b)
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+
+	// Generate float/double scaling helper functions
+	g.generateFloatDoubleHelpers(b)
+
+	// Generate services (PostFiat enhancement)
+	for _, service := range protoFile.GetService() {
+		err := g.generateService(service, b)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Close package namespace if it was opened
+	if len(packageName) > 0 {
+		b.Unindent()
+		b.P("}")
+		b.P()
+	}
+
+	// Generate output file
+	outputFileName := strings.TrimSuffix(protoFile.GetName(), ".proto") + ".sol"
+	outputFileName = filepath.Base(outputFileName)
+
+	return &pluginpb.CodeGeneratorResponse_File{
+		Name:    &outputFileName,
 		Content: proto.String(b.String()),
-	}
-
-	return responseFile, nil
+	}, nil
 }
 
-func (g *Generator) generateEnum(descriptor *descriptorpb.EnumDescriptorProto, b *WriteableBuffer) error {
-	enumName := descriptor.GetName()
-	enumValues := descriptor.GetValue()
+// generateService generates Solidity interface code from a protobuf service descriptor
+func (g *Generator) generateService(service *descriptorpb.ServiceDescriptorProto, b *WriteableBuffer) error {
+	serviceName := sanitizeKeyword(service.GetName())
 
-	// Note: we don't need this check since it's enforced by protoc, but keep it just in case
-	if len(enumValues) == 0 {
-		return errors.New("enums must have at least one value: " + enumName)
-	}
-
-	enumNamesString := ""
-	oldValue := -1
-	for _, enumValue := range enumValues {
-		if oldValue != -1 {
-			enumNamesString += ", "
-		}
-
-		name := enumValue.GetName()
-		value := int(enumValue.GetNumber())
-
-		enumNamesString += name
-
-		// Note: checking for zero isn't needed since it's enforced by protoc
-		if value != oldValue+1 {
-			return errors.New("enums must start at 0 and increment by 1: " + enumName + "." + name)
-		}
-		oldValue = value
-	}
-
-	b.P(fmt.Sprintf("enum %s { %s }", enumName, enumNamesString))
-	b.P()
-
-	// Store the maximum enum value for later use
-	g.enumMaxes[enumName] = oldValue
-
-	return nil
-}
-
-func (g *Generator) generateMessage(descriptor *descriptorpb.DescriptorProto, b *WriteableBuffer) error {
-	structName := descriptor.GetName()
-	err := checkKeyword(structName)
-	if err != nil {
-		return err
-	}
-
-	// Forbid nested enums and messages
-	if len(descriptor.GetEnumType()) > 0 || len(descriptor.GetNestedType()) > 0 {
-		return errors.New("maps and nested enum and message definitions are forbidden: " + structName)
-	}
-
-	fields := descriptor.GetField()
-
-	if len(fields) == 0 {
-		return errors.New("messages must have at least one field: " + structName)
-	}
-
-	////////////////////////////////////
-	// Generate struct
-	////////////////////////////////////
-
-	b.P(fmt.Sprintf("struct %s {", structName))
+	b.P(fmt.Sprintf("interface %s {", serviceName))
 	b.Indent()
 
-	fieldCount := int32(0)
-	// Loop over fields
-	for _, field := range fields {
-		fieldDescriptorType := field.GetType()
-		fieldName := field.GetName()
-		err = checkKeyword(fieldName)
+	for _, method := range service.GetMethod() {
+		methodName := method.GetName()
+		inputType := method.GetInputType()
+		outputType := method.GetOutputType()
+
+		// Handle package-qualified type names
+		inputTypeName, err := g.resolveTypeName(inputType)
+		if err != nil {
+			return err
+		}
+		outputTypeName, err := g.resolveTypeName(outputType)
 		if err != nil {
 			return err
 		}
 
-		fieldNumber := field.GetNumber()
-		if fieldNumber != fieldCount+1 {
-			return errors.New("field number does not increment by 1: " + structName + "." + fieldName)
-		}
-		fieldCount++
-
-		// Forbid oneof
-		if field.OneofIndex != nil {
-			return errors.New("oneof fields are forbidden: " + structName + "." + fieldName)
-		}
-
-		arrayStr := ""
-		if isFieldRepeated(field) {
-			if isPrimitiveNumericType(fieldDescriptorType) {
-				if !isFieldPacked(field) {
-					return errors.New("repeated primitive numeric field must be packed: " + structName + "." + fieldName)
-				}
-			} else {
-				if isFieldPacked(field) {
-					// Note: protoc enforces repeated messages can't be packed
-					return errors.New("repeated message field must not be packed: " + structName + "." + fieldName)
-				}
-				// Solidity doesn't allow arrays of strings or bytes
-				switch fieldDescriptorType {
-				case descriptorpb.FieldDescriptorProto_TYPE_STRING,
-					descriptorpb.FieldDescriptorProto_TYPE_BYTES:
-					return errors.New("repeated strings and bytes are forbidden: " + structName + "." + fieldName)
-				}
-			}
-			arrayStr = "[]"
-		}
-
-		switch fieldDescriptorType {
-		case descriptorpb.FieldDescriptorProto_TYPE_ENUM,
-			descriptorpb.FieldDescriptorProto_TYPE_MESSAGE:
-			fieldTypeName, err := toSolMessageOrEnumName(field)
-			if err != nil {
-				return err
-			}
-			b.P(fmt.Sprintf("%s%s %s;", fieldTypeName, arrayStr, fieldName))
-		default:
-			// Convert protobuf field type to Solidity native type
-			fieldType, err := typeToSol(fieldDescriptorType)
-			if err != nil {
-				return errors.New(err.Error() + ": " + structName + "." + fieldName)
-			}
-
-			b.P(fmt.Sprintf("%s%s %s;", fieldType, arrayStr, fieldName))
-		}
-	}
-
-	b.Unindent()
-	b.P("}")
-	b.P()
-
-	b.P(fmt.Sprintf("library %sCodec {", structName))
-	b.Indent()
-
-	if g.generateFlag == generateFlagAll || g.generateFlag == generateFlagDecoder {
-		err = g.generateMessageDecoder(structName, fields, b)
-		if err != nil {
-			return err
-		}
-	}
-
-	if g.generateFlag == generateFlagAll || g.generateFlag == generateFlagEncoder {
-		err = g.generateMessageEncoder(structName, fields, b)
-		if err != nil {
-			return err
-		}
+		// Generate method signature
+		b.P(fmt.Sprintf("function %s(%s memory request) external pure returns (%s memory);", 
+			methodName, inputTypeName, outputTypeName))
 	}
 
 	b.Unindent()
@@ -351,1236 +368,76 @@ func (g *Generator) generateMessage(descriptor *descriptorpb.DescriptorProto, b 
 	b.P()
 
 	return nil
+} 
+
+// packageToLibraryName converts a protobuf package name to a valid Solidity library name
+func (g *Generator) packageToLibraryName(packageName string) string {
+	// Replace dots with underscores and capitalize
+	parts := strings.Split(packageName, ".")
+	for i, part := range parts {
+		if len(part) > 0 {
+			parts[i] = strings.ToUpper(part[:1]) + part[1:]
+		}
+	}
+	return strings.Join(parts, "_")
 }
 
-// Generate decoder
-func (g *Generator) generateMessageDecoder(structName string, fields []*descriptorpb.FieldDescriptorProto, b *WriteableBuffer) error {
-	// Top-level decoder function
-	b.P(fmt.Sprintf("function decode(uint64 initial_pos, bytes memory buf, uint64 len) internal pure returns (bool, uint64, %s memory) {", structName))
-	b.Indent()
-
-	b.P("// Message instance")
-	b.P(fmt.Sprintf("%s memory instance;", structName))
-	b.P("// Previous field number")
-	b.P("uint64 previous_field_number = 0;")
-	b.P("// Current position in the buffer")
-	b.P("uint64 pos = initial_pos;")
-	b.P()
-
-	b.P("// Sanity checks")
-	b.P("if (pos + len < pos) {")
-	b.Indent()
-	b.P("return (false, pos, instance);")
-	b.Unindent()
-	b.P("}")
-	b.P()
-
-	b.P("while (pos - initial_pos < len) {")
-	b.Indent()
-	b.P("// Decode the key (field number and wire type)")
-	b.P("bool success;")
-	b.P("uint64 field_number;")
-	b.P("ProtobufLib.WireType wire_type;")
-	b.P("(success, pos, field_number, wire_type) = ProtobufLib.decode_key(pos, buf);")
-	b.P("if (!success) {")
-	b.Indent()
-	b.P("return (false, pos, instance);")
-	b.Unindent()
-	b.P("}")
-	b.P()
-
-	b.P("// Check that the field number is within bounds")
-	b.P(fmt.Sprintf("if (field_number > %d) {", len(fields)))
-	b.Indent()
-	b.P("return (false, pos, instance);")
-	b.Unindent()
-	b.P("}")
-	b.P()
-
-	b.P("// Check that the field number of monotonically increasing")
-	b.P("if (field_number <= previous_field_number) {")
-	b.Indent()
-	b.P("return (false, pos, instance);")
-	b.Unindent()
-	b.P("}")
-	b.P()
-
-	b.P("// Check that the wire type is correct")
-	b.P("success = check_key(field_number, wire_type);")
-	b.P("if (!success) {")
-	b.Indent()
-	b.P("return (false, pos, instance);")
-	b.Unindent()
-	b.P("}")
-	b.P()
-
-	b.P("// Actually decode the field")
-	b.P("(success, pos) = decode_field(pos, buf, len, field_number, instance);")
-	b.P("if (!success) {")
-	b.Indent()
-	b.P("return (false, pos, instance);")
-	b.Unindent()
-	b.P("}")
-	b.P()
-
-	b.P("previous_field_number = field_number;")
-	b.Unindent()
-	b.P("}")
-	b.P()
-
-	b.P("// Decoding must have consumed len bytes")
-	b.P("if (pos != initial_pos + len) {")
-	b.Indent()
-	b.P("return (false, pos, instance);")
-	b.Unindent()
-	b.P("}")
-	b.P()
-
-	b.P("return (true, pos, instance);")
-	b.Unindent()
-	b.P("}")
-	b.P()
-
-	// Check key function
-	b.P("function check_key(uint64 field_number, ProtobufLib.WireType wire_type) internal pure returns (bool) {")
-	b.Indent()
-	for _, field := range fields {
-		fieldNumber := field.GetNumber()
-
-		b.P(fmt.Sprintf("if (field_number == %d) {", fieldNumber))
-		b.Indent()
-		wireStr, err := toSolWireType(field)
-		if err != nil {
-			return err
-		}
-		b.P(fmt.Sprintf("return wire_type == %s;", wireStr))
-		b.Unindent()
-		b.P("}")
-		b.P()
+// resolveTypeName resolves a protobuf type name to a Solidity type name with package support
+func (g *Generator) resolveTypeName(typeName string) (string, error) {
+	log.Printf("DEBUG: resolveTypeName called with typeName: '%s'", typeName)
+	
+	if len(typeName) == 0 {
+		log.Printf("WARNING: Empty type name passed to resolveTypeName, using default type")
+		// Workaround for corrupted descriptors: use a default type name
+		return "UnknownType", nil
 	}
-
-	b.P("return false;")
-	b.Unindent()
-	b.P("}")
-	b.P()
-
-	// Decode field dispatcher function
-	b.P(fmt.Sprintf("function decode_field(uint64 initial_pos, bytes memory buf, uint64 len, uint64 field_number, %s memory instance) internal pure returns (bool, uint64) {", structName))
-	b.Indent()
-	b.P("uint64 pos = initial_pos;")
-	b.P()
-
-	for _, field := range fields {
-		fieldNumber := field.GetNumber()
-
-		b.P(fmt.Sprintf("if (field_number == %d) {", fieldNumber))
-		b.Indent()
-		b.P("bool success;")
-		b.P(fmt.Sprintf("(success, pos) = decode_%d(pos, buf, instance);", fieldNumber))
-		b.P("if (!success) {")
-		b.Indent()
-		b.P("return (false, pos);")
-		b.Unindent()
-		b.P("}")
-		b.P()
-
-		b.P("return (true, pos);")
-		b.Unindent()
-		b.P("}")
-		b.P()
+	
+	// Remove leading dot
+	if typeName[0] == '.' {
+		typeName = typeName[1:]
+		log.Printf("DEBUG: Removed leading dot, typeName now: '%s'", typeName)
 	}
-
-	b.P("return (false, pos);")
-	b.Unindent()
-	b.P("}")
-	b.P()
-
-	// Individual field decoders
-	for _, field := range fields {
-		fieldName := field.GetName()
-		fieldDescriptorType := field.GetType()
-		fieldNumber := field.GetNumber()
-
-		b.P(fmt.Sprintf("// %s.%s", structName, fieldName))
-		b.P(fmt.Sprintf("function decode_%d(uint64 pos, bytes memory buf, %s memory instance) internal pure returns (bool, uint64) {", fieldNumber, structName))
-		b.Indent()
-
-		b.P("bool success;")
-		b.P()
-
-		if isFieldRepeated(field) {
-			// Repeated field
-
-			if isFieldPacked(field) {
-				// Packed repeated field
-
-				switch fieldDescriptorType {
-				case descriptorpb.FieldDescriptorProto_TYPE_ENUM:
-					// Packed repeated enum
-
-					fieldTypeName, err := toSolMessageOrEnumName(field)
-					if err != nil {
-						return err
-					}
-
-					b.P("uint64 len;")
-					b.P(fmt.Sprintf("(success, pos, len) = ProtobufLib.decode_length_delimited(pos, buf);"))
-					b.P("if (!success) {")
-					b.Indent()
-					b.P("return (false, pos);")
-					b.Unindent()
-					b.P("}")
-					b.P()
-
-					b.P("// Empty packed array must be omitted")
-					b.P("if (len == 0) {")
-					b.Indent()
-					b.P("return (false, pos);")
-					b.Unindent()
-					b.P("}")
-					b.P()
-
-					b.P("uint64 initial_pos = pos;")
-					b.P()
-
-					b.P("// Sanity checks")
-					b.P("if (initial_pos + len < initial_pos) {")
-					b.Indent()
-					b.P("return (false, pos);")
-					b.Unindent()
-					b.P("}")
-					b.P()
-
-					b.P("// Do one pass to count the number of elements")
-					b.P("uint64 cnt = 0;")
-					b.P("while (pos - initial_pos < len) {")
-					b.Indent()
-					b.P("int32 v;")
-					b.P("(success, pos, v) = ProtobufLib.decode_enum(pos, buf);")
-					b.P("if (!success) {")
-					b.Indent()
-					b.P("return (false, pos);")
-					b.Unindent()
-					b.P("}")
-					b.P("cnt += 1;")
-					b.Unindent()
-					b.P("}")
-					b.P()
-
-					b.P("// Allocated memory")
-					b.P(fmt.Sprintf("instance.%s = new %s[](cnt);", fieldName, fieldTypeName))
-					b.P()
-
-					b.P("// Now actually parse the elements")
-					b.P("pos = initial_pos;")
-					b.P("for (uint64 i = 0; i < cnt; i++) {")
-					b.Indent()
-					b.P("int32 v;")
-					b.P("(success, pos, v) = ProtobufLib.decode_enum(pos, buf);")
-					b.P("if (!success) {")
-					b.Indent()
-					b.P("return (false, pos);")
-					b.Unindent()
-					b.P("}")
-					b.P()
-
-					b.P("// Check that value is within enum range")
-					b.P(fmt.Sprintf("if (v < 0 || v > %d) {", g.enumMaxes[fieldTypeName]))
-					b.Indent()
-					b.P("return (false, pos);")
-					b.Unindent()
-					b.P("}")
-					b.P()
-
-					b.P(fmt.Sprintf("instance.%s[i] = %s(v);", fieldName, fieldTypeName))
-					b.Unindent()
-					b.P("}")
-					b.P()
-
-					b.P("// Decoding must have consumed len bytes")
-					b.P("if (pos != initial_pos + len) {")
-					b.Indent()
-					b.P("return (false, pos);")
-					b.Unindent()
-					b.P("}")
-					b.P()
-				default:
-					// Packed repeated numeric
-
-					fieldType, err := typeToSol(fieldDescriptorType)
-					if err != nil {
-						return errors.New(err.Error() + ": " + structName + "." + fieldName)
-					}
-					fieldDecodeType, err := typeToDecodeSol(fieldDescriptorType)
-					if err != nil {
-						return errors.New(err.Error() + ": " + structName + "." + fieldName)
-					}
-
-					b.P("uint64 len;")
-					b.P(fmt.Sprintf("(success, pos, len) = ProtobufLib.decode_length_delimited(pos, buf);"))
-					b.P("if (!success) {")
-					b.Indent()
-					b.P("return (false, pos);")
-					b.Unindent()
-					b.P("}")
-					b.P()
-
-					b.P("// Empty packed array must be omitted")
-					b.P("if (len == 0) {")
-					b.Indent()
-					b.P("return (false, pos);")
-					b.Unindent()
-					b.P("}")
-					b.P()
-
-					b.P("uint64 initial_pos = pos;")
-					b.P()
-
-					b.P("// Sanity checks")
-					b.P("if (pos + len < pos) {")
-					b.Indent()
-					b.P("return (false, pos);")
-					b.Unindent()
-					b.P("}")
-					b.P()
-
-					b.P("// Do one pass to count the number of elements")
-					b.P("uint64 cnt = 0;")
-					b.P("while (pos - initial_pos < len) {")
-					b.Indent()
-					b.P(fmt.Sprintf("%s v;", fieldType))
-					b.P(fmt.Sprintf("(success, pos, v) = ProtobufLib.decode_%s(pos, buf);", fieldDecodeType))
-					b.P("if (!success) {")
-					b.Indent()
-					b.P("return (false, pos);")
-					b.Unindent()
-					b.P("}")
-					b.P("cnt += 1;")
-					b.Unindent()
-					b.P("}")
-					b.P()
-
-					b.P("// Allocated memory")
-					b.P(fmt.Sprintf("instance.%s = new %s[](cnt);", fieldName, fieldType))
-					b.P()
-
-					b.P("// Now actually parse the elements")
-					b.P("pos = initial_pos;")
-					b.P("for (uint64 i = 0; i < cnt; i++) {")
-					b.Indent()
-					b.P(fmt.Sprintf("%s v;", fieldType))
-					b.P(fmt.Sprintf("(success, pos, v) = ProtobufLib.decode_%s(pos, buf);", fieldDecodeType))
-					b.P("if (!success) {")
-					b.Indent()
-					b.P("return (false, pos);")
-					b.Unindent()
-					b.P("}")
-					b.P()
-
-					b.P(fmt.Sprintf("instance.%s[i] = v;", fieldName))
-					b.Unindent()
-					b.P("}")
-					b.P()
-
-					b.P("// Decoding must have consumed len bytes")
-					b.P("if (pos != initial_pos + len) {")
-					b.Indent()
-					b.P("return (false, pos);")
-					b.Unindent()
-					b.P("}")
-					b.P()
-				}
-			} else {
-				// Non-packed repeated field (i.e. message)
-
-				fieldTypeName, err := toSolMessageOrEnumName(field)
-				if err != nil {
-					return err
-				}
-
-				b.P("uint64 initial_pos = pos;")
-				b.P()
-
-				b.P("// Do one pass to count the number of elements")
-				b.P("uint64 cnt = 0;")
-				b.P("while (pos < buf.length) {")
-				b.Indent()
-				b.P("uint64 len;")
-				b.P("(success, pos, len) = ProtobufLib.decode_embedded_message(pos, buf);")
-				b.P("if (!success) {")
-				b.Indent()
-				b.P("return (false, pos);")
-				b.Unindent()
-				b.P("}")
-				b.P()
-
-				b.P("// Sanity checks")
-				b.P("if (pos + len < pos) {")
-				b.Indent()
-				b.P("return (false, pos);")
-				b.Unindent()
-				b.P("}")
-				b.P()
-
-				b.P("pos += len;")
-				b.P("cnt += 1;")
-				b.P()
-
-				b.P("if (pos >= buf.length) {")
-				b.Indent()
-				b.P("break;")
-				b.Unindent()
-				b.P("}")
-				b.P()
-
-				b.P("// Decode next key")
-				b.P("uint64 field_number;")
-				b.P("ProtobufLib.WireType wire_type;")
-				b.P("(success, pos, field_number, wire_type) = ProtobufLib.decode_key(pos, buf);")
-				b.P("if (!success) {")
-				b.Indent()
-				b.P("return (false, pos);")
-				b.Unindent()
-				b.P("}")
-				b.P()
-
-				b.P("// Check if the field number is different")
-				b.P(fmt.Sprintf("if (field_number != %d) {", fieldNumber))
-				b.Indent()
-				b.P("break;")
-				b.Unindent()
-				b.P("}")
-				b.Unindent()
-				b.P("}")
-				b.P()
-
-				b.P("// Allocated memory")
-				b.P(fmt.Sprintf("instance.%s = new %s[](cnt);", fieldName, fieldTypeName))
-				b.P()
-
-				b.P("// Now actually parse the elements")
-				b.P("pos = initial_pos;")
-				b.P("for (uint64 i = 0; i < cnt; i++) {")
-				b.Indent()
-				b.P("uint64 len;")
-				b.P("(success, pos, len) = ProtobufLib.decode_embedded_message(pos, buf);")
-				b.P("if (!success) {")
-				b.Indent()
-				b.P("return (false, pos);")
-				b.Unindent()
-				b.P("}")
-				b.P()
-
-				b.P("initial_pos = pos;")
-				b.P()
-
-				b.P(fmt.Sprintf("%s memory nestedInstance;", fieldTypeName))
-				b.P(fmt.Sprintf("(success, pos, nestedInstance) = %sCodec.decode(pos, buf, len);", fieldTypeName))
-				b.P("if (!success) {")
-				b.Indent()
-				b.P("return (false, pos);")
-				b.Unindent()
-				b.P("}")
-				b.P()
-
-				b.P(fmt.Sprintf("instance.%s[i] = nestedInstance;", fieldName))
-				b.P()
-
-				b.P("// Skip over next key, reuse len")
-				b.P("if (i < cnt - 1) {")
-				b.Indent()
-				b.P("(success, pos, len) = ProtobufLib.decode_uint64(pos, buf);")
-				b.P("if (!success) {")
-				b.Indent()
-				b.P("return (false, pos);")
-				b.Unindent()
-				b.P("}")
-				b.Unindent()
-				b.P("}")
-				b.Unindent()
-				b.P("}")
-				b.P()
-			}
-		} else {
-			// Optional field (i.e. not repeated)
-
-			switch fieldDescriptorType {
-			case descriptorpb.FieldDescriptorProto_TYPE_ENUM:
-				fieldTypeName, err := toSolMessageOrEnumName(field)
-				if err != nil {
-					return err
-				}
-
-				b.P("int32 v;")
-				b.P("(success, pos, v) = ProtobufLib.decode_enum(pos, buf);")
-				b.P("if (!success) {")
-				b.Indent()
-				b.P("return (false, pos);")
-				b.Unindent()
-				b.P("}")
-				b.P()
-
-				b.P("// Default value must be omitted")
-				b.P("if (v == 0) {")
-				b.Indent()
-				b.P("return (false, pos);")
-				b.Unindent()
-				b.P("}")
-				b.P()
-
-				b.P("// Check that value is within enum range")
-				b.P(fmt.Sprintf("if (v < 0 || v > %d) {", g.enumMaxes[fieldTypeName]))
-				b.Indent()
-				b.P("return (false, pos);")
-				b.Unindent()
-				b.P("}")
-				b.P()
-
-				b.P(fmt.Sprintf("instance.%s = %s(v);", fieldName, fieldTypeName))
-				b.P()
-			case descriptorpb.FieldDescriptorProto_TYPE_MESSAGE:
-				// TODO check for default value of empty message
-				fieldTypeName, err := toSolMessageOrEnumName(field)
-				if err != nil {
-					return err
-				}
-
-				b.P("uint64 len;")
-				b.P("(success, pos, len) = ProtobufLib.decode_embedded_message(pos, buf);")
-				b.P("if (!success) {")
-				b.Indent()
-				b.P("return (false, pos);")
-				b.Unindent()
-				b.P("}")
-				b.P()
-
-				b.P("// Default value must be omitted")
-				b.P("if (len == 0) {")
-				b.Indent()
-				b.P("return (false, pos);")
-				b.Unindent()
-				b.P("}")
-				b.P()
-
-				b.P(fmt.Sprintf("%s memory nestedInstance;", fieldTypeName))
-				b.P(fmt.Sprintf("(success, pos, nestedInstance) = %sCodec.decode(pos, buf, len);", fieldTypeName))
-				b.P("if (!success) {")
-				b.Indent()
-				b.P("return (false, pos);")
-				b.Unindent()
-				b.P("}")
-				b.P()
-
-				b.P(fmt.Sprintf("instance.%s = nestedInstance;", fieldName))
-				b.P()
-			default:
-				fieldType, err := typeToSol(fieldDescriptorType)
-				if err != nil {
-					return errors.New(err.Error() + ": " + structName + "." + fieldName)
-				}
-				fieldDecodeType, err := typeToDecodeSol(fieldDescriptorType)
-				if err != nil {
-					return errors.New(err.Error() + ": " + structName + "." + fieldName)
-				}
-
-				switch fieldDescriptorType {
-				case descriptorpb.FieldDescriptorProto_TYPE_INT32,
-					descriptorpb.FieldDescriptorProto_TYPE_INT64,
-					descriptorpb.FieldDescriptorProto_TYPE_UINT32,
-					descriptorpb.FieldDescriptorProto_TYPE_UINT64,
-					descriptorpb.FieldDescriptorProto_TYPE_SINT32,
-					descriptorpb.FieldDescriptorProto_TYPE_SINT64,
-					descriptorpb.FieldDescriptorProto_TYPE_FIXED32,
-					descriptorpb.FieldDescriptorProto_TYPE_FIXED64,
-					descriptorpb.FieldDescriptorProto_TYPE_SFIXED32,
-					descriptorpb.FieldDescriptorProto_TYPE_SFIXED64:
-					b.P(fmt.Sprintf("%s v;", fieldType))
-					b.P(fmt.Sprintf("(success, pos, v) = ProtobufLib.decode_%s(pos, buf);", fieldDecodeType))
-					b.P("if (!success) {")
-					b.Indent()
-					b.P("return (false, pos);")
-					b.Unindent()
-					b.P("}")
-					b.P()
-
-					b.P("// Default value must be omitted")
-					b.P("if (v == 0) {")
-					b.Indent()
-					b.P("return (false, pos);")
-					b.Unindent()
-					b.P("}")
-					b.P()
-
-					b.P(fmt.Sprintf("instance.%s = v;", fieldName))
-					b.P()
-				case descriptorpb.FieldDescriptorProto_TYPE_BOOL:
-					b.P(fmt.Sprintf("%s v;", fieldType))
-					b.P(fmt.Sprintf("(success, pos, v) = ProtobufLib.decode_%s(pos, buf);", fieldDecodeType))
-					b.P("if (!success) {")
-					b.Indent()
-					b.P("return (false, pos);")
-					b.Unindent()
-					b.P("}")
-					b.P()
-
-					b.P("// Default value must be omitted")
-					b.P("if (v == false) {")
-					b.Indent()
-					b.P("return (false, pos);")
-					b.Unindent()
-					b.P("}")
-					b.P()
-
-					b.P(fmt.Sprintf("instance.%s = v;", fieldName))
-					b.P()
-				case descriptorpb.FieldDescriptorProto_TYPE_STRING:
-					b.P(fmt.Sprintf("%s memory v;", fieldType))
-					b.P(fmt.Sprintf("(success, pos, v) = ProtobufLib.decode_%s(pos, buf);", fieldDecodeType))
-					b.P("if (!success) {")
-					b.Indent()
-					b.P("return (false, pos);")
-					b.Unindent()
-					b.P("}")
-					b.P()
-
-					b.P("// Default value must be omitted")
-					b.P("if (bytes(v).length == 0) {")
-					b.Indent()
-					b.P("return (false, pos);")
-					b.Unindent()
-					b.P("}")
-					b.P()
-
-					b.P(fmt.Sprintf("instance.%s = v;", fieldName))
-					b.P()
-				case descriptorpb.FieldDescriptorProto_TYPE_BYTES:
-					b.P("uint64 len;")
-					b.P(fmt.Sprintf("(success, pos, len) = ProtobufLib.decode_%s(pos, buf);", fieldDecodeType))
-					b.P("if (!success) {")
-					b.Indent()
-					b.P("return (false, pos);")
-					b.Unindent()
-					b.P("}")
-					b.P()
-
-					b.P("// Default value must be omitted")
-					b.P("if (len == 0) {")
-					b.Indent()
-					b.P("return (false, pos);")
-					b.Unindent()
-					b.P("}")
-					b.P()
-
-					b.P(fmt.Sprintf("instance.%s = new bytes(len);", fieldName))
-					b.P("for (uint64 i = 0; i < len; i++) {")
-					b.Indent()
-					b.P(fmt.Sprintf("instance.%s[i] = buf[pos + i];", fieldName))
-					b.Unindent()
-					b.P("}")
-					b.P()
-
-					b.P("pos = pos + len;")
-					b.P()
-				default:
-					return errors.New("unsupported field type: " + fieldDescriptorType.String())
+	
+	// Handle package-qualified type names
+	// Format: "package.name.TypeName" -> "Package_Name.TypeName"
+	if strings.Contains(typeName, ".") {
+		parts := strings.Split(typeName, ".")
+		if len(parts) >= 2 {
+			// Convert package name to library name format
+			packageParts := parts[:len(parts)-1]
+			typeNamePart := parts[len(parts)-1]
+			
+			// Convert package parts to library name format
+			for i, part := range packageParts {
+				if len(part) > 0 {
+					packageParts[i] = strings.ToUpper(part[:1]) + part[1:]
 				}
 			}
-		}
-
-		b.P("return (true, pos);")
-		b.Unindent()
-		b.P("}")
-		b.P()
-	}
-
-	return nil
-}
-
-// Generate encoder
-func (g *Generator) generateMessageEncoder(structName string, fields []*descriptorpb.FieldDescriptorProto, b *WriteableBuffer) error {
-	structNameEncoded := structName + "__Encoded"
-	structNameEncodedNested := structNameEncoded + "__Nested"
-
-	////////////////////////////////////
-	// Generate structs to hold encoded version of message struct
-	////////////////////////////////////
-
-	b.P("// Holds encoded version of message")
-	b.P(fmt.Sprintf("struct %s {", structNameEncoded))
-	b.Indent()
-
-	// Loop over fields
-	for _, field := range fields {
-		fieldDescriptorType := field.GetType()
-		fieldName := field.GetName()
-		err := checkKeyword(fieldName)
-		if err != nil {
-			return err
-		}
-
-		switch fieldDescriptorType {
-		case descriptorpb.FieldDescriptorProto_TYPE_MESSAGE:
-			fieldTypeName, err := toSolMessageOrEnumName(field)
-			if err != nil {
-				return err
-			}
-			fieldTypeNameEncodedNested := fieldTypeName + "__Encoded__Nested"
-
-			arrayStr := ""
-			if isFieldRepeated(field) {
-				arrayStr = "[]"
-			}
-
-			b.P(fmt.Sprintf("%sCodec.%s%s %s;", fieldTypeName, fieldTypeNameEncodedNested, arrayStr, fieldName))
-
-			// Add a field for encoded version of nested message
-			b.P(fmt.Sprintf("bytes %s__Encoded;", fieldName))
-		default:
-			// Add a field for the key
-			fieldNameKey := fieldName + "__Key"
-			b.P(fmt.Sprintf("bytes %s;", fieldNameKey))
-
-			// For repeated and length-delimited fields, add field for length in bytes
-			if isFieldRepeated(field) ||
-				fieldDescriptorType == descriptorpb.FieldDescriptorProto_TYPE_STRING ||
-				fieldDescriptorType == descriptorpb.FieldDescriptorProto_TYPE_BYTES {
-				fieldNameLength := fieldName + "__Length"
-				b.P(fmt.Sprintf("bytes %s;", fieldNameLength))
-			}
-
-			b.P(fmt.Sprintf("bytes %s;", fieldName))
+			libraryName := strings.Join(packageParts, "_")
+			
+			// Return library-qualified type name
+			result := fmt.Sprintf("%s.%s", libraryName, typeNamePart)
+			log.Printf("DEBUG: Package-qualified type resolved to: '%s'", result)
+			return result, nil
 		}
 	}
-
-	b.Unindent()
-	b.P("}")
-	b.P()
-
-	b.P("// Holds encoded version of nested message")
-	b.P(fmt.Sprintf("struct %s {", structNameEncodedNested))
-	b.Indent()
-
-	b.P("bytes key;")
-	b.P("bytes length;")
-	b.P("bytes nestedInstance;")
-
-	b.Unindent()
-	b.P("}")
-	b.P()
-
-	////////////////////////////////////
-	// Generate encoder for non-nested message
-	////////////////////////////////////
-
-	b.P(fmt.Sprintf("function encode(%s memory instance) internal pure returns (bytes memory) {", structName))
-	b.Indent()
-
-	b.P(fmt.Sprintf("%s memory encodedInstance;", structNameEncoded))
-	b.P("uint64 len;")
-	b.P("uint64 index;")
-	b.P()
-
-	// Loop over fields
-	for _, field := range fields {
-		fieldDescriptorType := field.GetType()
-		fieldName := field.GetName()
-		err := checkKeyword(fieldName)
-		if err != nil {
-			return err
-		}
-
-		switch fieldDescriptorType {
-		case descriptorpb.FieldDescriptorProto_TYPE_MESSAGE:
-			// Message type
-
-			fieldNumber := field.GetNumber()
-			fieldTypeName, err := toSolMessageOrEnumName(field)
-			if err != nil {
-				return err
-			}
-
-			if isFieldRepeated(field) {
-				// Repeated message
-
-				fieldTypeNameEncodedNested := fieldTypeName + "__Encoded__Nested"
-
-				b.P(fmt.Sprintf("// Encode %s", fieldName))
-				b.P("len = 0;")
-				b.P(fmt.Sprintf("encodedInstance.%s = new %sCodec.%s[](instance.%s.length);", fieldName, fieldTypeName, fieldTypeNameEncodedNested, fieldName))
-				b.P(fmt.Sprintf("for (uint64 i = 0; i < instance.%s.length; i++) {", fieldName))
-				b.Indent()
-				b.P(fmt.Sprintf("encodedInstance.%s[i] = %sCodec.encodeNested(%d, instance.%s[i]);", fieldName, fieldTypeName, fieldNumber, fieldName))
-				b.P(fmt.Sprintf("len += uint64(encodedInstance.%s[i].key.length + encodedInstance.%s[i].length.length + encodedInstance.%s[i].nestedInstance.length);", fieldName, fieldName, fieldName))
-				b.Unindent()
-				b.P("}")
-				b.P()
-
-				b.P(fmt.Sprintf("encodedInstance.%s__Encoded = new bytes(len);", fieldName))
-				b.P("index = 0;")
-				b.P(fmt.Sprintf("for (uint64 i = 0; i < instance.%s.length; i++) {", fieldName))
-				b.Indent()
-				b.P("uint64 j = 0;")
-				b.P(fmt.Sprintf("while (j < encodedInstance.%s[i].key.length) {", fieldName))
-				b.Indent()
-				b.P(fmt.Sprintf("encodedInstance.%s__Encoded[index++] = encodedInstance.%s[i].key[j++];", fieldName, fieldName))
-				b.Unindent()
-				b.P("}")
-				b.P("j = 0;")
-				b.P(fmt.Sprintf("while (j < encodedInstance.%s[i].length.length) {", fieldName))
-				b.Indent()
-				b.P(fmt.Sprintf("encodedInstance.%s__Encoded[index++] = encodedInstance.%s[i].length[j++];", fieldName, fieldName))
-				b.Unindent()
-				b.P("}")
-				b.P("j = 0;")
-				b.P(fmt.Sprintf("while (j < encodedInstance.%s[i].nestedInstance.length) {", fieldName))
-				b.Indent()
-				b.P(fmt.Sprintf("encodedInstance.%s__Encoded[index++] = encodedInstance.%s[i].nestedInstance[j++];", fieldName, fieldName))
-				b.Unindent()
-				b.P("}")
-				b.Unindent()
-				b.P("}")
-				b.P()
-			} else {
-				// Non-repeated message
-
-				b.P(fmt.Sprintf("// Encode %s", fieldName))
-				b.P(fmt.Sprintf("encodedInstance.%s = %sCodec.encodeNested(%d, instance.%s);", fieldName, fieldTypeName, fieldNumber, fieldName))
-				b.P(fmt.Sprintf("encodedInstance.%s__Encoded = abi.encodePacked(encodedInstance.%s.key, encodedInstance.%s.length, encodedInstance.%s.nestedInstance);", fieldName, fieldName, fieldName, fieldName))
-				b.P()
-			}
-		default:
-			// Non-message type
-
-			fieldNumber := field.GetNumber()
-			fieldNameKey := fieldName + "__Key"
-			fieldNameLength := fieldName + "__Length"
-
-			if isFieldRepeated(field) {
-				// Repeated numeric type
-
-				fieldNameLength := fieldName + "__Length"
-
-				b.P(fmt.Sprintf("// Encode %s if length non-zero", fieldName))
-				b.P(fmt.Sprintf("len = uint64(instance.%s.length);", fieldName))
-				b.P("if (len > 0) {")
-				b.Indent()
-
-				b.P("// Encode key")
-				wireStr, err := toSolWireType(field)
-				if err != nil {
-					return err
-				}
-				b.P(fmt.Sprintf("encodedInstance.%s = ProtobufLib.encode_key(%d, uint64(%s));", fieldNameKey, fieldNumber, wireStr))
-				b.P()
-
-				b.P("// Encode length")
-				b.P(fmt.Sprintf("encodedInstance.%s = ProtobufLib.encode_uint64(len);", fieldNameLength))
-				b.P()
-
-				b.P("// Allocate enough bytes for len up-to-10-byte varints")
-				b.P("bytes memory temp = new bytes(len * 10);")
-				b.P("uint64 tempLength = 0;")
-				b.P("for (uint64 i = 0; i < len; i++) {")
-				b.Indent()
-
-				b.P("// Encode each element in the array and append it to temp")
-				switch fieldDescriptorType {
-				case descriptorpb.FieldDescriptorProto_TYPE_ENUM:
-					b.P(fmt.Sprintf("bytes memory tempElement = ProtobufLib.encode_int32(int32(instance.%s[i]));", fieldName))
-				default:
-					fieldDecodeType, err := typeToDecodeSol(fieldDescriptorType)
-					if err != nil {
-						return errors.New(err.Error() + ": " + structName + "." + fieldName)
-					}
-					b.P(fmt.Sprintf("bytes memory tempElement = ProtobufLib.encode_%s(instance.%s[i]);", fieldDecodeType, fieldName))
-				}
-				b.P("for (uint64 j = 0; j < tempElement.length; j++) {")
-				b.Indent()
-				b.P("temp[tempLength++] = tempElement[j];")
-				b.Unindent()
-				b.P("}")
-
-				b.Unindent()
-				b.P("}")
-				b.P()
-
-				b.P("// Allocate just enough bytes and copy temp bytes over")
-				b.P("bytes memory encodedBytes = new bytes(tempLength);")
-				b.P("for (uint64 i = 0; i < temp.length; i++) {")
-				b.Indent()
-				b.P("encodedBytes[i] = temp[i];")
-				b.Unindent()
-				b.P("}")
-				b.P()
-
-				b.P(fmt.Sprintf("encodedInstance.%s = encodedBytes;", fieldName))
-				b.Unindent()
-				b.P("}")
-				b.P()
-			} else {
-				// Non-repeated non-message (numeric, or string/bytes)
-
-				b.P(fmt.Sprintf("// Omit encoding %s if default value", fieldName))
-				switch fieldDescriptorType {
-				case descriptorpb.FieldDescriptorProto_TYPE_STRING,
-					descriptorpb.FieldDescriptorProto_TYPE_BYTES:
-					b.P(fmt.Sprintf("if (bytes(instance.%s).length > 0) {", fieldName))
-				case descriptorpb.FieldDescriptorProto_TYPE_BOOL:
-					b.P(fmt.Sprintf("if (bool(instance.%s) != false) {", fieldName))
-				default:
-					b.P(fmt.Sprintf("if (uint64(instance.%s) != 0) {", fieldName))
-				}
-				b.Indent()
-
-				b.P(fmt.Sprintf("// Encode key for %s", fieldName))
-				wireStr, err := toSolWireType(field)
-				if err != nil {
-					return err
-				}
-				b.P(fmt.Sprintf("encodedInstance.%s = ProtobufLib.encode_key(%d, uint64(%s));", fieldNameKey, fieldNumber, wireStr))
-
-				b.P(fmt.Sprintf("// Encode %s", fieldName))
-				switch fieldDescriptorType {
-				case descriptorpb.FieldDescriptorProto_TYPE_STRING,
-					descriptorpb.FieldDescriptorProto_TYPE_BYTES:
-					b.P(fmt.Sprintf("encodedInstance.%s = ProtobufLib.encode_uint64(uint64(bytes(instance.%s).length));", fieldNameLength, fieldName))
-					b.P(fmt.Sprintf("encodedInstance.%s = bytes(instance.%s);", fieldName, fieldName))
-				case descriptorpb.FieldDescriptorProto_TYPE_ENUM:
-					b.P(fmt.Sprintf("encodedInstance.%s = ProtobufLib.encode_int32(int32(instance.%s));", fieldName, fieldName))
-				default:
-					fieldDecodeType, err := typeToDecodeSol(fieldDescriptorType)
-					if err != nil {
-						return errors.New(err.Error() + ": " + structName + "." + fieldName)
-					}
-					b.P(fmt.Sprintf("encodedInstance.%s = ProtobufLib.encode_%s(instance.%s);", fieldName, fieldDecodeType, fieldName))
-				}
-
-				b.Unindent()
-				b.P("}")
-				b.P()
-			}
-		}
-	}
-
-	// We can't use abi.encodePacked here because of EVM stack limits
-	b.P("bytes memory finalEncoded;")
-	b.P("index = 0;")
-	b.P("len = 0;")
-	for _, field := range fields {
-		fieldDescriptorType := field.GetType()
-		fieldName := field.GetName()
-		err := checkKeyword(fieldName)
-		if err != nil {
-			return err
-		}
-
-		switch fieldDescriptorType {
-		case descriptorpb.FieldDescriptorProto_TYPE_MESSAGE:
-			// Message type
-			b.P(fmt.Sprintf("len += uint64(encodedInstance.%s__Encoded.length);", fieldName))
-		default:
-			// Non-message type
-			b.P(fmt.Sprintf("len += uint64(encodedInstance.%s.length);", fieldName))
-		}
-	}
-	b.P("finalEncoded = new bytes(len);")
-	b.P()
-
-	b.P("uint64 j;")
-	for _, field := range fields {
-		fieldDescriptorType := field.GetType()
-		fieldName := field.GetName()
-		err := checkKeyword(fieldName)
-		if err != nil {
-			return err
-		}
-
-		switch fieldDescriptorType {
-		case descriptorpb.FieldDescriptorProto_TYPE_MESSAGE:
-			// Message type
-			b.P("j = 0;")
-			b.P(fmt.Sprintf("while (j < encodedInstance.%s__Encoded.length) {", fieldName))
-			b.Indent()
-			b.P(fmt.Sprintf("finalEncoded[index++] = encodedInstance.%s__Encoded[j++];", fieldName))
-			b.Unindent()
-			b.P("}")
-		default:
-			// Non-message type
-			b.P("j = 0;")
-			b.P(fmt.Sprintf("while (j < encodedInstance.%s.length) {", fieldName))
-			b.Indent()
-			b.P(fmt.Sprintf("finalEncoded[index++] = encodedInstance.%s[j++];", fieldName))
-			b.Unindent()
-			b.P("}")
-		}
-	}
-	b.P()
-
-	b.P("return finalEncoded;")
-	b.Unindent()
-	b.P("}")
-	b.P()
-
-	////////////////////////////////////
-	// Generate encoder for nested message
-	////////////////////////////////////
-
-	b.P(fmt.Sprintf("// Encode a nested %s, wrapped in key and length if non-default", structName))
-	b.P(fmt.Sprintf("function encodeNested(uint64 field_number, %s memory instance) internal pure returns (%s memory) {", structName, structNameEncodedNested))
-	b.Indent()
-
-	b.P(fmt.Sprintf("%s memory wrapped;", structNameEncodedNested))
-	b.P()
-
-	b.P("wrapped.nestedInstance = encode(instance);")
-	b.P()
-
-	b.P("uint64 len = uint64(wrapped.nestedInstance.length);")
-	b.P("if (len > 0) {")
-	b.Indent()
-	b.P("wrapped.key = ProtobufLib.encode_key(field_number, 2);")
-	b.P("wrapped.length = ProtobufLib.encode_uint64(len);")
-	b.Unindent()
-	b.P("}")
-	b.P()
-
-	b.P("return wrapped;")
-	b.Unindent()
-	b.P("}")
-	b.P()
-
-	return nil
+	
+	log.Printf("DEBUG: Simple type name resolved to: '%s'", typeName)
+	return typeName, nil
 }
 
-func checkSyntaxVersion(v string) error {
-	if v == "proto3" {
-		return nil
+// dependencyToImportPath converts a protobuf dependency to a Solidity import path
+func (g *Generator) dependencyToImportPath(dependency string) string {
+	// Remove .proto extension if present
+	if strings.HasSuffix(dependency, ".proto") {
+		dependency = strings.TrimSuffix(dependency, ".proto")
 	}
-
-	return errors.New("must use syntax = \"proto3\";")
-}
-
-func checkKeyword(w string) error {
-	// https://solidity.readthedocs.io/en/v0.6.12/cheatsheet.html
-
-	switch w {
-	case
-		// Global Variables
-		"abi",
-		"block",
-		"gasleft",
-		"msg",
-		"now",
-		"tx",
-		"assert",
-		"require",
-		"revert",
-		"blockhash",
-		"keccak256",
-		"sha256",
-		"ripemd160",
-		"ecrecover",
-		"addmod",
-		"mulmod",
-		"this",
-		"super",
-		"selfdestruct",
-		"type",
-		// Function Visibility Specifiers
-		"public",
-		"private",
-		"external",
-		"internal",
-		// Modifiers
-		"pure",
-		"view",
-		"payable",
-		"constant",
-		"immutable",
-		"anonymous",
-		"indexed",
-		"virtual",
-		"override",
-		// Reserved Keywords
-		"after",
-		"alias",
-		"apply",
-		"auto",
-		"case",
-		"copyof",
-		"default",
-		"define",
-		"final",
-		"implements",
-		"in",
-		"inline",
-		"let",
-		"macro",
-		"match",
-		"mutable",
-		"null",
-		"of",
-		"partial",
-		"promise",
-		"reference",
-		"relocatable",
-		"sealed",
-		"sizeof",
-		"static",
-		"supports",
-		"switch",
-		"typedef",
-		"typeof",
-		"unchecked":
-		return errors.New("Solidity keywords forbidden: " + w)
-	}
-
-	return nil
-}
-
-func typeToSol(fType descriptorpb.FieldDescriptorProto_Type) (string, error) {
-	s := ""
-
-	switch fType {
-	case descriptorpb.FieldDescriptorProto_TYPE_INT32:
-		s = "int32"
-	case descriptorpb.FieldDescriptorProto_TYPE_INT64:
-		s = "int64"
-	case descriptorpb.FieldDescriptorProto_TYPE_UINT32:
-		s = "uint32"
-	case descriptorpb.FieldDescriptorProto_TYPE_UINT64:
-		s = "uint64"
-	case descriptorpb.FieldDescriptorProto_TYPE_SINT32:
-		s = "int32"
-	case descriptorpb.FieldDescriptorProto_TYPE_SINT64:
-		s = "int64"
-	case descriptorpb.FieldDescriptorProto_TYPE_FIXED32:
-		s = "uint32"
-	case descriptorpb.FieldDescriptorProto_TYPE_FIXED64:
-		s = "uint64"
-	case descriptorpb.FieldDescriptorProto_TYPE_SFIXED32:
-		s = "int32"
-	case descriptorpb.FieldDescriptorProto_TYPE_SFIXED64:
-		s = "int64"
-	case descriptorpb.FieldDescriptorProto_TYPE_BOOL:
-		s = "bool"
-	case descriptorpb.FieldDescriptorProto_TYPE_STRING:
-		s = "string"
-	case descriptorpb.FieldDescriptorProto_TYPE_BYTES:
-		s = "bytes"
-	default:
-		return "", errors.New("unsupported field type " + fType.String())
-	}
-
-	err := checkKeyword(s)
-	if err != nil {
-		return s, err
-	}
-
-	return s, nil
-}
-
-func typeToDecodeSol(fType descriptorpb.FieldDescriptorProto_Type) (string, error) {
-	s := ""
-
-	switch fType {
-	case descriptorpb.FieldDescriptorProto_TYPE_INT32:
-		s = "int32"
-	case descriptorpb.FieldDescriptorProto_TYPE_INT64:
-		s = "int64"
-	case descriptorpb.FieldDescriptorProto_TYPE_UINT32:
-		s = "uint32"
-	case descriptorpb.FieldDescriptorProto_TYPE_UINT64:
-		s = "uint64"
-	case descriptorpb.FieldDescriptorProto_TYPE_SINT32:
-		s = "sint32"
-	case descriptorpb.FieldDescriptorProto_TYPE_SINT64:
-		s = "sint64"
-	case descriptorpb.FieldDescriptorProto_TYPE_FIXED32:
-		s = "fixed32"
-	case descriptorpb.FieldDescriptorProto_TYPE_FIXED64:
-		s = "fixed64"
-	case descriptorpb.FieldDescriptorProto_TYPE_SFIXED32:
-		s = "sfixed32"
-	case descriptorpb.FieldDescriptorProto_TYPE_SFIXED64:
-		s = "sfixed64"
-	case descriptorpb.FieldDescriptorProto_TYPE_BOOL:
-		s = "bool"
-	case descriptorpb.FieldDescriptorProto_TYPE_STRING:
-		s = "string"
-	case descriptorpb.FieldDescriptorProto_TYPE_BYTES:
-		s = "bytes"
-	default:
-		return "", errors.New("unsupported field type " + fType.String())
-	}
-
-	err := checkKeyword(s)
-	if err != nil {
-		return s, err
-	}
-
-	return s, nil
-}
-
-func isPrimitiveNumericType(fType descriptorpb.FieldDescriptorProto_Type) bool {
-	switch fType {
-	case descriptorpb.FieldDescriptorProto_TYPE_INT32,
-		descriptorpb.FieldDescriptorProto_TYPE_INT64,
-		descriptorpb.FieldDescriptorProto_TYPE_UINT32,
-		descriptorpb.FieldDescriptorProto_TYPE_UINT64,
-		descriptorpb.FieldDescriptorProto_TYPE_SINT32,
-		descriptorpb.FieldDescriptorProto_TYPE_SINT64,
-		descriptorpb.FieldDescriptorProto_TYPE_FIXED32,
-		descriptorpb.FieldDescriptorProto_TYPE_FIXED64,
-		descriptorpb.FieldDescriptorProto_TYPE_SFIXED32,
-		descriptorpb.FieldDescriptorProto_TYPE_SFIXED64,
-		descriptorpb.FieldDescriptorProto_TYPE_BOOL,
-		descriptorpb.FieldDescriptorProto_TYPE_ENUM:
-		return true
-	}
-	return false
-}
-
-func isFieldRepeated(field *descriptorpb.FieldDescriptorProto) bool {
-	return field.GetLabel() == descriptorpb.FieldDescriptorProto_LABEL_REPEATED
-}
-
-func isFieldPacked(field *descriptorpb.FieldDescriptorProto) bool {
-	return field.GetOptions().GetPacked()
-}
-
-func toSolWireType(field *descriptorpb.FieldDescriptorProto) (string, error) {
-	fType := field.GetType()
-
-	if isFieldRepeated(field) {
-		return "ProtobufLib.WireType.LengthDelimited", nil
-	}
-	switch fType {
-	case descriptorpb.FieldDescriptorProto_TYPE_INT32,
-		descriptorpb.FieldDescriptorProto_TYPE_INT64,
-		descriptorpb.FieldDescriptorProto_TYPE_UINT32,
-		descriptorpb.FieldDescriptorProto_TYPE_UINT64,
-		descriptorpb.FieldDescriptorProto_TYPE_SINT32,
-		descriptorpb.FieldDescriptorProto_TYPE_SINT64,
-		descriptorpb.FieldDescriptorProto_TYPE_BOOL,
-		descriptorpb.FieldDescriptorProto_TYPE_ENUM:
-		return "ProtobufLib.WireType.Varint", nil
-	case descriptorpb.FieldDescriptorProto_TYPE_FIXED32,
-		descriptorpb.FieldDescriptorProto_TYPE_SFIXED32:
-		return "ProtobufLib.WireType.Bits32", nil
-	case descriptorpb.FieldDescriptorProto_TYPE_FIXED64,
-		descriptorpb.FieldDescriptorProto_TYPE_SFIXED64:
-		return "ProtobufLib.WireType.Bits64", nil
-	case descriptorpb.FieldDescriptorProto_TYPE_STRING,
-		descriptorpb.FieldDescriptorProto_TYPE_BYTES,
-		descriptorpb.FieldDescriptorProto_TYPE_MESSAGE:
-		return "ProtobufLib.WireType.LengthDelimited", nil
-	}
-
-	return "", errors.New("unsupported field type: " + fType.String())
-}
-
-func toSolMessageOrEnumName(field *descriptorpb.FieldDescriptorProto) (string, error) {
-	// Names take the form ".name", so remove the leading period
-	return field.GetTypeName()[1:], nil
-}
+	
+	// For now, assume relative imports in the same directory
+	// In a more sophisticated implementation, this could:
+	// 1. Look up the package name of the dependency
+	// 2. Generate appropriate import paths based on package structure
+	// 3. Handle different import strategies (relative vs absolute)
+	
+	return fmt.Sprintf("./%s.sol", dependency)
+} 
