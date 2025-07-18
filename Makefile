@@ -5,7 +5,7 @@ PROTOC := protoc
 BIN_DIR := bin
 
 #LDFLAGS := -ldflags "-X main.version=$(shell git describe --tags)"
-LDFLAGS := -ldflags "-X main.version=v0.1.0-dev"
+LDFLAGS := -ldflags "-X main.version=v0.3.0"
 
 TARGET_GEN_SOL := protoc-gen-sol
 TARGETS := $(TARGET_GEN_SOL)

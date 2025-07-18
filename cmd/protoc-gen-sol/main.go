@@ -9,7 +9,7 @@ import (
 	"google.golang.org/protobuf/types/pluginpb"
 )
 
-var version = "unspecified version"
+var version = "v0.3.0"
 
 func main() {
 	// Read marshaled request from stdin
