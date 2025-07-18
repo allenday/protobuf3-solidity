@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package postfiat.v3;
+
+message TestMessage {
+  string field1 = 1;
+  uint64 field2 = 2;
+}
+
+enum TestEnum {
+  UNKNOWN = 0;
+  VALUE1 = 1;
+  VALUE2 = 2;
+}
+
+service TestService {
+  rpc TestMethod(TestMessage) returns (TestMessage);
+} 
