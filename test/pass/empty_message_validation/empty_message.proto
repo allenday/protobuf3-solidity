@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package empty_message_validation;
+
+// Empty message with no fields
+message GetAgentCardRequest {
+  // Empty. Added to fix linter violation.
+}
+
+// Empty message with comment
+message EmptyResponse {
+  // Empty response message
+}
+
+// Service using empty messages
+service TestService {
+  rpc GetAgentCard(GetAgentCardRequest) returns (EmptyResponse);
+} 
