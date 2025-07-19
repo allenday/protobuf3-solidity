@@ -39,6 +39,18 @@ protoc --plugin protoc-gen-sol --sol_out license=Apache-2.0:. foo.proto
   - `all`: both decoder and encoder will be generated
   - `decoder`: only decoder will be generated
   - `encoder`: only encoder will be generated (experimental!)
+- `strict_field_numbers`: default `true`
+  - `true`: enforce strict field number validation (must increment by 1)
+  - `false`: allow non-monotonic field ordering
+- `strict_enum_validation`: default `true`
+  - `true`: enforce strict enum validation (must start at 0 and increment by 1)
+  - `false`: allow relaxed enum validation
+- `allow_empty_packed_arrays`: default `false`
+  - `true`: allow empty packed arrays (useful for compatibility with some protobuf implementations)
+  - `false`: reject empty packed arrays (default strict behavior)
+- `allow_non_monotonic_fields`: default `false`
+  - `true`: allow fields to be encoded in non-monotonic order (useful for compatibility with upgraded schemas)
+  - `false`: enforce strict field ordering (default strict behavior)
 
 ### Feature support
 
@@ -126,8 +138,9 @@ message StreamMessagesRequest {
 
 **Rules to keep in mind:**
 1. Enum values must start at `0` and increment by `1` (unless `strict_enum_validation=false`).
-1. Field numbers must start at `1` and increment by `1` (unless `strict_field_numbers=false`).
+1. Field numbers must start at `1` and increment by `1` (unless `strict_field_numbers=false` or `allow_non_monotonic_fields=true`).
 1. Repeated numeric types must explicitly specify `[packed = true]`.
+1. Empty packed arrays are rejected by default (unless `allow_empty_packed_arrays=true`).
 
 **Supported features**:
 1. ✅ **All primitive types** - int32, int64, uint32, uint64, sint32, sint64, fixed32, fixed64, sfixed32, sfixed64, bool, string, bytes, float, double
