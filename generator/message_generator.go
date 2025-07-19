@@ -112,7 +112,7 @@ func (g *Generator) generateMessage(descriptor *descriptorpb.DescriptorProto, pa
 		fieldNumber := int(field.GetNumber())
 
 		// Configurable field number validation - can be disabled via parameters
-		if g.strictFieldNumberValidation && fieldNumber != oldFieldNumber+1 {
+		if g.strictFieldNumberValidation && !g.allowNonMonotonicFields && fieldNumber != oldFieldNumber+1 {
 			return errors.New("field number does not increment by 1: " + structName + "." + field.GetName())
 		}
 		oldFieldNumber = fieldNumber

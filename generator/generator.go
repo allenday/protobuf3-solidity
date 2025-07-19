@@ -83,6 +83,11 @@ type Generator struct {
 	// Configuration options
 	strictFieldNumberValidation bool
 	strictEnumValidation       bool
+	allowEmptyPackedArrays     bool
+	allowNonMonotonicFields    bool
+	
+	// Global message registry for type resolution
+	messageRegistry map[string]*descriptorpb.DescriptorProto
 }
 
 // New initializes a new Generator.
@@ -93,6 +98,7 @@ func New(request *pluginpb.CodeGeneratorRequest, versionString string) *Generato
 	g.enumMaxes = make(map[string]int)
 	g.helperMessages = make(map[string]map[string]*descriptorpb.DescriptorProto)
 	g.mapFieldMappings = make(map[string]string)
+	g.messageRegistry = make(map[string]*descriptorpb.DescriptorProto)
 
 	g.versionString = versionString
 	g.licenseString = "CC0"
@@ -103,6 +109,8 @@ func New(request *pluginpb.CodeGeneratorRequest, versionString string) *Generato
 	// Default configuration
 	g.strictFieldNumberValidation = true
 	g.strictEnumValidation = true
+	g.allowEmptyPackedArrays = false
+	g.allowNonMonotonicFields = false
 
 	return g
 }
@@ -154,6 +162,22 @@ func (g *Generator) ParseParameters() error {
 				g.strictEnumValidation = true
 			} else {
 				return errors.New("strict_enum_validation must be 'true' or 'false'")
+			}
+		case "allow_empty_packed_arrays":
+			if value == "true" {
+				g.allowEmptyPackedArrays = true
+			} else if value == "false" {
+				g.allowEmptyPackedArrays = false
+			} else {
+				return errors.New("allow_empty_packed_arrays must be 'true' or 'false'")
+			}
+		case "allow_non_monotonic_fields":
+			if value == "true" {
+				g.allowNonMonotonicFields = true
+			} else if value == "false" {
+				g.allowNonMonotonicFields = false
+			} else {
+				return errors.New("allow_non_monotonic_fields must be 'true' or 'false'")
 			}
 		default:
 			return errors.New("unrecognized option " + key)
