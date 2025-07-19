@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"path/filepath"
 	"strings"
 
 	"google.golang.org/protobuf/proto"
@@ -383,12 +384,15 @@ func (g *Generator) generateFile(protoFile *descriptorpb.FileDescriptorProto) (*
 	// Create response file with package-based naming
 	var outFileName string
 	if len(packageName) > 0 {
-		// Convert package name to path format
+		// Convert package name to path format and use original file name
 		packagePath := strings.ReplaceAll(packageName, ".", "/")
-		outFileName = fmt.Sprintf("%s.sol", packagePath)
+		baseName := strings.TrimSuffix(filepath.Base(fileName), ".proto")
+		// Create directory structure that matches imports
+		outFileName = fmt.Sprintf("%s/%s.sol", packagePath, baseName)
 	} else {
 		// For files without package, use the file name without .proto
-		outFileName = strings.TrimSuffix(strings.TrimSuffix(fileName, ".proto"), ".proto") + ".sol"
+		baseName := strings.TrimSuffix(filepath.Base(fileName), ".proto")
+		outFileName = fmt.Sprintf("%s.sol", baseName)
 	}
 
 	outFile := &pluginpb.CodeGeneratorResponse_File{
@@ -502,38 +506,35 @@ func (g *Generator) dependencyToImportPath(dependency string) string {
 	// Convert path separators to forward slashes
 	dependency = strings.ReplaceAll(dependency, "\\", "/")
 
-	// Split path into components
-	components := strings.Split(dependency, "/")
-
-	// Handle node_modules imports
-	if strings.Contains(dependency, "node_modules") {
-		// Extract the package name from node_modules path
-		// e.g., "node_modules/@scope/package/file" -> "@scope/package"
-		var packageName string
-		for i, comp := range components {
-			if comp == "node_modules" && i+1 < len(components) {
-				if strings.HasPrefix(components[i+1], "@") && i+2 < len(components) {
-					// Scoped package
-					packageName = components[i+1] + "/" + components[i+2]
-					// Get the remaining path after the package name
-					if i+3 < len(components) {
-						return fmt.Sprintf("%s/%s.sol", packageName, strings.Join(components[i+3:], "/"))
-					}
-					return fmt.Sprintf("%s/index.sol", packageName)
-				} else {
-					// Regular package
-					packageName = components[i+1]
-					// Get the remaining path after the package name
-					if i+2 < len(components) {
-						return fmt.Sprintf("%s/%s.sol", packageName, strings.Join(components[i+2:], "/"))
-					}
-					return fmt.Sprintf("%s/index.sol", packageName)
-				}
-			}
-		}
+	// Handle special case for ProtobufLib
+	if dependency == "ProtobufLib" {
+		return "@lazyledger/protobuf3-solidity-lib/contracts/ProtobufLib.sol"
 	}
 
-	// For local imports, use relative path with .sol extension
+	// Handle scoped packages (starting with @)
+	if strings.HasPrefix(dependency, "@") {
+		return fmt.Sprintf("%s.sol", dependency)
+	}
+
+	// Handle node_modules imports
+	if strings.Contains(dependency, "node_modules/") {
+		// Remove node_modules/ prefix and convert to package import
+		parts := strings.Split(strings.TrimPrefix(dependency, "node_modules/"), "/")
+		if len(parts) >= 2 && strings.HasPrefix(parts[0], "@") {
+			// Scoped package
+			return fmt.Sprintf("%s/%s.sol", parts[0], strings.Join(parts[1:], "/"))
+		}
+		return fmt.Sprintf("%s.sol", strings.Join(parts, "/"))
+	}
+
+	// For local imports, use relative path based on package structure
+	if strings.Contains(dependency, "/") {
+		dir := filepath.Dir(dependency)
+		base := filepath.Base(dependency)
+		return fmt.Sprintf("%s/%s.sol", dir, base)
+	}
+
+	// For files in the same directory
 	return fmt.Sprintf("./%s.sol", dependency)
 }
 

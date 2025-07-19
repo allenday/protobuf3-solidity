@@ -21,6 +21,7 @@ func checkFieldNumbers(fields []*descriptorpb.FieldDescriptorProto, strictFieldN
 		return nil
 	}
 
+	// Empty messages are valid in proto3
 	if len(fields) == 0 {
 		return nil
 	}
