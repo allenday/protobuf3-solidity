@@ -89,6 +89,10 @@ func (g *Generator) generateMessage(descriptor *descriptorpb.DescriptorProto, pa
 	}
 
 	structName := sanitizeKeyword(descriptor.GetName())
+	fields := descriptor.GetField()
+
+	// Create a map to track field names and ensure uniqueness
+	fieldNameMap := make(map[int32]string) // field number -> sanitized name
 
 	// PostFiat enhancement: Handle nested enums by flattening them to top-level
 	if len(descriptor.GetEnumType()) > 0 {
@@ -138,8 +142,6 @@ func (g *Generator) generateMessage(descriptor *descriptorpb.DescriptorProto, pa
 		}
 	}
 
-	fields := descriptor.GetField()
-
 	// Generate struct
 	b.P("// ", structName, " represents a protobuf message")
 	b.P(fmt.Sprintf("struct %s {", structName))
@@ -149,7 +151,6 @@ func (g *Generator) generateMessage(descriptor *descriptorpb.DescriptorProto, pa
 	if len(fields) > 0 {
 		// Create a map to track used field names and ensure uniqueness
 		usedFieldNames := make(map[string]bool)
-		fieldNameMap := make(map[int32]string) // field number -> sanitized name
 
 		// First pass: collect all field names and their sanitized versions
 		type fieldInfo struct {
@@ -249,16 +250,17 @@ func (g *Generator) generateMessage(descriptor *descriptorpb.DescriptorProto, pa
 					if len(originalTypeName) > 0 && originalTypeName[0] == '.' {
 						originalTypeName = originalTypeName[1:]
 					}
-					g.mapFieldMappings[originalTypeName] = wrapperName
+					g.messageMappings[originalTypeName] = wrapperName
 
-					b.P(fmt.Sprintf("%s%s %s;", wrapperName, arrayStr, fieldName))
+					// Use the wrapper message type for the map field
+					b.P(fmt.Sprintf("%s%s %s;", arrayStr, wrapperName, fieldName))
 				} else {
-					// Regular enum or message field
-					fieldTypeName, err := g.getSolTypeName(field)
+					// Handle regular enum or message field
+					typeName, err := g.getSolTypeName(field)
 					if err != nil {
 						return err
 					}
-					b.P(fmt.Sprintf("%s%s %s;", fieldTypeName, arrayStr, fieldName))
+					b.P(fmt.Sprintf("%s%s %s;", arrayStr, typeName, fieldName))
 				}
 			case descriptorpb.FieldDescriptorProto_TYPE_STRING:
 				// PostFiat enhancement: Use wrapper message for repeated strings
@@ -271,7 +273,7 @@ func (g *Generator) generateMessage(descriptor *descriptorpb.DescriptorProto, pa
 						g.helperMessages[packageName][wrapperName] = g.createStringWrapperMessage(fieldName)
 						log.Printf("INFO: Generated wrapper message '%s' for repeated string field '%s.%s'", wrapperName, structName, fieldName)
 					}
-					b.P(fmt.Sprintf("%s%s %s;", wrapperName, arrayStr, fieldName))
+					b.P(fmt.Sprintf("%s%s %s;", arrayStr, wrapperName, fieldName))
 				} else {
 					// Regular string field
 					fieldType, err := typeToSol(fieldDescriptorType)
@@ -291,7 +293,7 @@ func (g *Generator) generateMessage(descriptor *descriptorpb.DescriptorProto, pa
 						g.helperMessages[packageName][wrapperName] = g.createBytesWrapperMessage(fieldName)
 						log.Printf("INFO: Generated wrapper message '%s' for repeated bytes field '%s.%s'", wrapperName, structName, fieldName)
 					}
-					b.P(fmt.Sprintf("%s%s %s;", wrapperName, arrayStr, fieldName))
+					b.P(fmt.Sprintf("%s%s %s;", arrayStr, wrapperName, fieldName))
 				} else {
 					// Regular bytes field
 					fieldType, err := typeToSol(fieldDescriptorType)
