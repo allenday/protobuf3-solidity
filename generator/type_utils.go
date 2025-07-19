@@ -4,10 +4,172 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 
 	"google.golang.org/protobuf/types/descriptorpb"
 )
+
+// List of Solidity reserved keywords that need to be sanitized
+var solidityReservedKeywords = map[string]bool{
+	"abstract":     true,
+	"address":      true,
+	"after":        true,
+	"alias":        true,
+	"anonymous":    true,
+	"apply":        true,
+	"assembly":     true,
+	"auto":         true,
+	"bool":         true,
+	"break":        true,
+	"byte":         true,
+	"bytes":        true,
+	"calldata":     true,
+	"case":         true,
+	"catch":        true,
+	"constant":     true,
+	"constructor":  true,
+	"continue":     true,
+	"contract":     true,
+	"copyof":       true,
+	"days":         true,
+	"default":      true,
+	"define":       true,
+	"delete":       true,
+	"do":           true,
+	"else":         true,
+	"emit":         true,
+	"enum":         true,
+	"ether":        true,
+	"event":        true,
+	"external":     true,
+	"fallback":     true,
+	"false":        true,
+	"final":        true,
+	"finney":       true,
+	"fixed":        true,
+	"for":          true,
+	"from":         true,
+	"function":     true,
+	"gwei":        true,
+	"hex":         true,
+	"hours":       true,
+	"if":          true,
+	"implements":  true,
+	"import":      true,
+	"in":          true,
+	"indexed":     true,
+	"inline":      true,
+	"interface":   true,
+	"internal":    true,
+	"is":          true,
+	"let":         true,
+	"library":     true,
+	"mapping":     true,
+	"match":       true,
+	"memory":      true,
+	"minutes":     true,
+	"modifier":    true,
+	"new":         true,
+	"null":        true,
+	"of":          true,
+	"override":    true,
+	"package":     true,
+	"payable":     true,
+	"pragma":      true,
+	"private":     true,
+	"public":      true,
+	"pure":        true,
+	"receive":     true,
+	"reference":   true,
+	"return":      true,
+	"returns":     true,
+	"revert":      true,
+	"seconds":     true,
+	"selector":    true,
+	"self":        true,
+	"storage":     true,
+	"string":      true,
+	"struct":      true,
+	"super":       true,
+	"switch":      true,
+	"szabo":       true,
+	"throw":       true,
+	"true":        true,
+	"try":         true,
+	"type":        true,
+	"typedef":     true,
+	"typeof":      true,
+	"uint":        true,
+	"uint8":       true,
+	"uint16":      true,
+	"uint24":      true,
+	"uint32":      true,
+	"uint40":      true,
+	"uint48":      true,
+	"uint56":      true,
+	"uint64":      true,
+	"uint72":      true,
+	"uint80":      true,
+	"uint88":      true,
+	"uint96":      true,
+	"uint104":     true,
+	"uint112":     true,
+	"uint120":     true,
+	"uint128":     true,
+	"uint136":     true,
+	"uint144":     true,
+	"uint152":     true,
+	"uint160":     true,
+	"uint168":     true,
+	"uint176":     true,
+	"uint184":     true,
+	"uint192":     true,
+	"uint200":     true,
+	"uint208":     true,
+	"uint216":     true,
+	"uint224":     true,
+	"uint232":     true,
+	"uint240":     true,
+	"uint248":     true,
+	"uint256":     true,
+	"unchecked":   true,
+	"using":       true,
+	"var":         true,
+	"view":        true,
+	"virtual":     true,
+	"weeks":       true,
+	"wei":         true,
+	"while":       true,
+	"years":       true,
+}
+
+// sanitizeKeyword sanitizes a field name to avoid Solidity reserved keywords
+func sanitizeKeyword(name string) string {
+	// If name is already sanitized (starts with underscore), return as is
+	if strings.HasPrefix(name, "_") {
+		return name
+	}
+	
+	// Check if it's a reserved keyword
+	if solidityReservedKeywords[name] {
+		return "_" + name
+	}
+	
+	// Check if it's a numeric type (uint8, int256, etc.)
+	if strings.HasPrefix(name, "uint") || strings.HasPrefix(name, "int") {
+		if _, err := strconv.Atoi(name[4:]); err == nil {
+			return "_" + name
+		}
+	}
+	
+	// Check if it starts with a number
+	if len(name) > 0 && name[0] >= '0' && name[0] <= '9' {
+		return "_" + name
+	}
+	
+	return name
+}
 
 // typeToSol converts protobuf field type to Solidity native type
 func typeToSol(fType descriptorpb.FieldDescriptorProto_Type) (string, error) {

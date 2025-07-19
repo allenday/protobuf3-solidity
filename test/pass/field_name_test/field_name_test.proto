@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package field_name_test;
+
+message TestFieldNames {
+    // Test Solidity reserved keywords
+    string if = 1;
+    string _if = 2;
+    string if_2 = 3;
+    string function = 4;
+    string reference = 5;
+    string uint256 = 6;
+
+    // Test numeric prefixes
+    string field1 = 7;
+    string _field1 = 8;
+
+    // Test map fields (for helper message generation)
+    map<string, string> test_map = 9;
+    map<uint32, bytes> data_map = 10;
+
+    // Test repeated fields (for helper message generation)
+    repeated string strings = 11;
+    repeated bytes data = 12;
+
+    // Test nested message and enum
+    message NestedMessage {
+        string value = 1;
+        NestedEnum type = 2;
+    }
+
+    enum NestedEnum {
+        UNKNOWN = 0;
+        VALUE_1 = 1;
+        VALUE_2 = 2;
+    }
+
+    NestedMessage nested = 13;
+} 

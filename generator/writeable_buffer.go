@@ -5,46 +5,65 @@ import (
 	"fmt"
 )
 
-// WriteableBuffer is a writeable buffer wrapper
+// WriteableBuffer is a buffer that can be written to with indentation
 type WriteableBuffer struct {
-	buf    bytes.Buffer
+	buffer bytes.Buffer
 	indent string
 }
 
-// Indent increases indentation for subsequent writes
-func (b *WriteableBuffer) Indent() {
-	b.indent += "    "
-}
-
-// Unindent decreases indentation for subsequent writes
-func (b *WriteableBuffer) Unindent() {
-	if len(b.indent) > 0 {
-		b.indent = b.indent[4:]
+// NewWriteableBuffer creates a new WriteableBuffer
+func NewWriteableBuffer() *WriteableBuffer {
+	return &WriteableBuffer{
+		indent: "",
 	}
 }
 
-// P writes an object to the buffer
-func (b *WriteableBuffer) P(s ...interface{}) {
-	if s != nil {
-		b.buf.WriteString(b.indent)
-		for _, v := range s {
-			b.printAtom(v)
+// P prints a line to the buffer with indentation
+func (b *WriteableBuffer) P(format ...interface{}) {
+	if len(format) > 0 {
+		b.buffer.WriteString(b.indent)
+		if len(format) == 1 {
+			if str, ok := format[0].(string); ok {
+				b.buffer.WriteString(str)
+			} else {
+				fmt.Fprintf(&b.buffer, "%v", format[0])
+			}
+		} else {
+			fmt.Fprintf(&b.buffer, format[0].(string), format[1:]...)
 		}
 	}
-	b.buf.WriteByte('\n')
+	b.buffer.WriteByte('\n')
 }
 
-func (b *WriteableBuffer) printAtom(v interface{}) {
-	switch v := v.(type) {
-	case string:
-		b.buf.WriteString(v)
-	case bool, int, int32, int64, uint, uint32, uint64:
-		b.buf.WriteString(fmt.Sprint(v))
-	default:
-		panic(fmt.Sprintf("unknown type in printer: %T", v))
+// Indent increases the indentation level
+func (b *WriteableBuffer) Indent() {
+	b.indent += "\t"
+}
+
+// Unindent decreases the indentation level
+func (b *WriteableBuffer) Unindent() {
+	if len(b.indent) > 0 {
+		b.indent = b.indent[1:]
 	}
 }
 
+// String returns the contents of the buffer as a string
 func (b *WriteableBuffer) String() string {
-	return b.buf.String()
+	return b.buffer.String()
+}
+
+// Bytes returns the contents of the buffer as a byte slice
+func (b *WriteableBuffer) Bytes() []byte {
+	return b.buffer.Bytes()
+}
+
+// Reset resets the buffer
+func (b *WriteableBuffer) Reset() {
+	b.buffer.Reset()
+	b.indent = ""
+}
+
+// P0 prints an empty line to the buffer
+func (b *WriteableBuffer) P0() {
+	b.buffer.WriteByte('\n')
 }

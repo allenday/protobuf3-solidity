@@ -40,7 +40,7 @@ func (g *Generator) generateEnum(descriptor *descriptorpb.EnumDescriptorProto, b
 	}
 
 	b.P(fmt.Sprintf("enum %s { %s }", enumName, enumNamesString))
-	b.P()
+	b.P0()
 
 	// Store the maximum enum value for later use
 	g.enumMaxes[enumName] = oldValue
@@ -57,7 +57,13 @@ func (g *Generator) generateFlattenedEnum(descriptor *descriptorpb.EnumDescripto
 	}
 	
 	// Generate the enum with the flattened name
-	return g.generateEnum(flattenedDescriptor, b)
+	err := g.generateEnum(flattenedDescriptor, b)
+	if err != nil {
+		return err
+	}
+	
+	b.P0()
+	return nil
 }
 
 // generateFlattenedMessage generates a flattened message from a nested message descriptor
@@ -129,52 +135,81 @@ func (g *Generator) generateMessage(descriptor *descriptorpb.DescriptorProto, pa
 
 	fields := descriptor.GetField()
 
-	// Debug: Print detailed field information for problematic messages
-	if structName == "GetAgentCardRequest" {
-		log.Printf("DEBUG: GetAgentCardRequest descriptor details:")
-		log.Printf("  - Name: %s", descriptor.GetName())
-		log.Printf("  - Field count: %d", len(fields))
-		for i, field := range fields {
-			log.Printf("  - Field %d: %s (type: %v, number: %d)", i, field.GetName(), field.GetType(), field.GetNumber())
-		}
-		log.Printf("  - Nested type count: %d", len(descriptor.GetNestedType()))
-		log.Printf("  - Enum type count: %d", len(descriptor.GetEnumType()))
-	}
-
-	// Note: we don't need this check since it's enforced by protoc, but keep it just in case
-	// However, some protoc versions may have bugs where valid messages show 0 fields in descriptors
-	if len(fields) == 0 {
-		// Check if this might be a protoc descriptor generation issue
-		// If the message has a valid name and no nested types/enums, it's likely a valid message
-		if len(descriptor.GetNestedType()) == 0 && len(descriptor.GetEnumType()) == 0 {
-			log.Printf("WARNING: Message '%s' has 0 fields but appears to be a valid protobuf message. "+
-				"This may be due to a protoc descriptor generation issue. Skipping field validation.", structName)
-			// Continue processing without fields - this will generate an empty struct
-		} else {
-			return errors.New("messages must have at least one field: " + structName)
-		}
-	}
-
-	// Check field numbers start at 1 and increment by 1
-	oldFieldNumber := 0
-	for _, field := range fields {
-		fieldNumber := int(field.GetNumber())
-
-		// Configurable field number validation - can be disabled via parameters
-		if g.strictFieldNumberValidation && !g.allowNonMonotonicFields && fieldNumber != oldFieldNumber+1 {
-			return errors.New("field number does not increment by 1: " + structName + "." + field.GetName())
-		}
-		oldFieldNumber = fieldNumber
-	}
-
 	// Generate struct
 	b.P(fmt.Sprintf("struct %s {", structName))
 	b.Indent()
 
 	// Generate fields (only if we have fields)
 	if len(fields) > 0 {
+		// Create a map to track used field names and ensure uniqueness
+		usedFieldNames := make(map[string]bool)
+		fieldNameMap := make(map[int32]string) // field number -> sanitized name
+		
+		// First pass: collect all field names and their sanitized versions
+		type fieldInfo struct {
+			originalName  string
+			sanitizedName string
+			fieldNumber   int32
+		}
+		var allFields []fieldInfo
+		
 		for _, field := range fields {
-			fieldName := sanitizeKeyword(field.GetName())
+			originalName := field.GetName()
+			sanitizedName := sanitizeKeyword(originalName)
+			fieldNumber := field.GetNumber()
+			
+			// For already sanitized names (starting with _), keep the original prefix
+			if strings.HasPrefix(originalName, "_") {
+				sanitizedName = originalName
+			}
+			
+			allFields = append(allFields, fieldInfo{
+				originalName:  originalName,
+				sanitizedName: sanitizedName,
+				fieldNumber:   fieldNumber,
+			})
+		}
+		
+		// Second pass: ensure unique field names
+		for i := range allFields {
+			field := &allFields[i]
+			baseName := field.sanitizedName
+			counter := 1
+			
+			// Keep trying names until we find a unique one
+			for {
+				used := false
+				
+				// Check if this name is already used
+				for j := 0; j < i; j++ {
+					if allFields[j].sanitizedName == field.sanitizedName {
+						used = true
+						break
+					}
+				}
+				
+				if !used {
+					break
+				}
+				
+				// Try next name variant
+				if strings.HasPrefix(baseName, "_") {
+					// For already sanitized names, append counter after the original name
+					field.sanitizedName = fmt.Sprintf("%s_%d", baseName, counter)
+				} else {
+					// For regular names, prepend underscore and append counter
+					field.sanitizedName = fmt.Sprintf("_%s_%d", baseName, counter)
+				}
+				counter++
+			}
+			
+			usedFieldNames[field.sanitizedName] = true
+			fieldNameMap[field.fieldNumber] = field.sanitizedName
+		}
+		
+		// Generate fields with unique names
+		for _, field := range fields {
+			fieldName := fieldNameMap[field.GetNumber()]
 			fieldDescriptorType := field.GetType()
 
 			// Determine if field is repeated
@@ -273,47 +308,32 @@ func (g *Generator) generateMessage(descriptor *descriptorpb.DescriptorProto, pa
 
 	b.Unindent()
 	b.P("}")
-	b.P()
+	b.P0()
 
+	// Generate codec library at the top level
 	b.P(fmt.Sprintf("library %sCodec {", structName))
 	b.Indent()
-
+	
 	// Only generate codec functions if we have fields
 	if len(fields) > 0 {
 		if g.generateFlag == generateFlagAll || g.generateFlag == generateFlagDecoder {
-			var err error
-			err = g.generateMessageDecoder(structName, fields, b)
+			err := g.generateMessageDecoder(structName, fields, fieldNameMap, b)
 			if err != nil {
 				return err
 			}
 		}
 
 		if g.generateFlag == generateFlagAll || g.generateFlag == generateFlagEncoder {
-			var err error
-			err = g.generateMessageEncoder(structName, fields, b)
+			err := g.generateMessageEncoder(structName, fields, fieldNameMap, b)
 			if err != nil {
 				return err
 			}
 		}
-	} else {
-		// For messages with 0 fields, generate a minimal codec with empty functions
-		b.P("// Empty message - no fields to encode/decode")
-		b.P("function encode(bytes memory) internal pure returns (bytes memory) {")
-		b.Indent()
-		b.P("return new bytes(0);")
-		b.Unindent()
-		b.P("}")
-		b.P("")
-		b.P("function decode(bytes memory) internal pure returns (bytes memory) {")
-		b.Indent()
-		b.P("return new bytes(0);")
-		b.Unindent()
-		b.P("}")
 	}
 
 	b.Unindent()
 	b.P("}")
-	b.P()
+	b.P0()
 
 	return nil
 } 
