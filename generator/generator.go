@@ -118,7 +118,7 @@ func New(request *pluginpb.CodeGeneratorRequest, versionString string) *Generato
 	g.strictEnumValidation = true
 	g.allowEmptyPackedArrays = false
 	g.allowNonMonotonicFields = false
-	g.protobufLibImportPath = "ProtobufLib.sol" // Default import path
+	g.protobufLibImportPath = "ProtobufLib.sol" // Always use local import
 
 	return g
 }
@@ -188,7 +188,13 @@ func (g *Generator) ParseParameters() error {
 				return errors.New("allow_non_monotonic_fields must be 'true' or 'false'")
 			}
 		case "protobuf_lib_import":
-			g.protobufLibImportPath = value
+			// Extract base name and enforce local import
+			parts := strings.Split(value, "/")
+			baseName := parts[len(parts)-1]
+			if !strings.HasSuffix(baseName, ".sol") {
+				baseName += ".sol"
+			}
+			g.protobufLibImportPath = baseName
 		default:
 			return errors.New("unrecognized option " + key)
 		}
@@ -519,7 +525,15 @@ func (g *Generator) dependencyToImportPath(dependency string) string {
 
 	// Handle ProtobufLib import
 	if dependency == "ProtobufLib" {
-		return g.protobufLibImportPath
+		return "ProtobufLib.sol"
+	}
+
+	// Handle scoped packages and node_modules imports
+	if strings.HasPrefix(dependency, "@") || strings.Contains(dependency, "node_modules/") {
+		// Extract the base name and use local import
+		parts := strings.Split(dependency, "/")
+		baseName := parts[len(parts)-1]
+		return baseName + ".sol"
 	}
 
 	// For local imports, preserve directory structure
