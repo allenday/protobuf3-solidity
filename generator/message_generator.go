@@ -6,8 +6,8 @@ import (
 	"log"
 	"strings"
 
-	"google.golang.org/protobuf/types/descriptorpb"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/descriptorpb"
 )
 
 // generateEnum generates Solidity enum code from a protobuf enum descriptor
@@ -55,13 +55,13 @@ func (g *Generator) generateFlattenedEnum(descriptor *descriptorpb.EnumDescripto
 		Name:  proto.String(flattenedName),
 		Value: descriptor.GetValue(),
 	}
-	
+
 	// Generate the enum with the flattened name
 	err := g.generateEnum(flattenedDescriptor, b)
 	if err != nil {
 		return err
 	}
-	
+
 	b.P0()
 	return nil
 }
@@ -70,40 +70,45 @@ func (g *Generator) generateFlattenedEnum(descriptor *descriptorpb.EnumDescripto
 func (g *Generator) generateFlattenedMessage(descriptor *descriptorpb.DescriptorProto, packageName string, flattenedName string, b *WriteableBuffer) error {
 	// Create a copy of the message descriptor with the flattened name
 	flattenedDescriptor := &descriptorpb.DescriptorProto{
-		Name:      proto.String(flattenedName),
-		Field:     descriptor.GetField(),
-		EnumType:  descriptor.GetEnumType(),
+		Name:       proto.String(flattenedName),
+		Field:      descriptor.GetField(),
+		EnumType:   descriptor.GetEnumType(),
 		NestedType: descriptor.GetNestedType(),
-		Options:   descriptor.GetOptions(),
+		Options:    descriptor.GetOptions(),
 	}
-	
+
 	// Generate the message with the flattened name
 	return g.generateMessage(flattenedDescriptor, packageName, b)
 }
 
-// generateMessage generates Solidity message code from a protobuf message descriptor
+// generateMessage generates Solidity code for a protobuf message.
 func (g *Generator) generateMessage(descriptor *descriptorpb.DescriptorProto, packageName string, b *WriteableBuffer) error {
+	// Reject empty messages
+	if len(descriptor.GetField()) == 0 {
+		return fmt.Errorf("message '%s' must contain at least one field", descriptor.GetName())
+	}
+
 	structName := sanitizeKeyword(descriptor.GetName())
-	
+
 	// PostFiat enhancement: Handle nested enums by flattening them to top-level
 	if len(descriptor.GetEnumType()) > 0 {
 		log.Printf("INFO: Flattening %d nested enums in message '%s' to top-level enums", len(descriptor.GetEnumType()), structName)
-		
+
 		// Generate flattened enums first
 		for _, enumDescriptor := range descriptor.GetEnumType() {
 			// Create unique name for the flattened enum
 			flattenedEnumName := fmt.Sprintf("%s_%s", structName, enumDescriptor.GetName())
-			
+
 			// Store the mapping for type resolution
 			g.enumMappings[fmt.Sprintf("%s.%s", structName, enumDescriptor.GetName())] = flattenedEnumName
-			
+
 			// Generate the flattened enum
 			if err := g.generateFlattenedEnum(enumDescriptor, flattenedEnumName, b); err != nil {
 				return err
 			}
 		}
 	}
-	
+
 	// PostFiat enhancement: Handle nested messages by flattening them to top-level
 	if len(descriptor.GetNestedType()) > 0 {
 		// Filter out map entries (protobuf maps are represented as nested messages)
@@ -113,18 +118,18 @@ func (g *Generator) generateMessage(descriptor *descriptorpb.DescriptorProto, pa
 				actualNestedMessages = append(actualNestedMessages, nestedType)
 			}
 		}
-		
+
 		if len(actualNestedMessages) > 0 {
 			log.Printf("INFO: Flattening %d nested messages in message '%s' to top-level messages", len(actualNestedMessages), structName)
-			
+
 			// Generate flattened messages first
 			for _, nestedDescriptor := range actualNestedMessages {
 				// Create unique name for the flattened message
 				flattenedMessageName := fmt.Sprintf("%s_%s", structName, nestedDescriptor.GetName())
-				
+
 				// Store the mapping for type resolution
 				g.messageMappings[fmt.Sprintf("%s.%s", structName, nestedDescriptor.GetName())] = flattenedMessageName
-				
+
 				// Generate the flattened message
 				if err := g.generateFlattenedMessage(nestedDescriptor, packageName, flattenedMessageName, b); err != nil {
 					return err
@@ -136,6 +141,7 @@ func (g *Generator) generateMessage(descriptor *descriptorpb.DescriptorProto, pa
 	fields := descriptor.GetField()
 
 	// Generate struct
+	b.P("// ", structName, " represents a protobuf message")
 	b.P(fmt.Sprintf("struct %s {", structName))
 	b.Indent()
 
@@ -144,7 +150,7 @@ func (g *Generator) generateMessage(descriptor *descriptorpb.DescriptorProto, pa
 		// Create a map to track used field names and ensure uniqueness
 		usedFieldNames := make(map[string]bool)
 		fieldNameMap := make(map[int32]string) // field number -> sanitized name
-		
+
 		// First pass: collect all field names and their sanitized versions
 		type fieldInfo struct {
 			originalName  string
@@ -152,34 +158,34 @@ func (g *Generator) generateMessage(descriptor *descriptorpb.DescriptorProto, pa
 			fieldNumber   int32
 		}
 		var allFields []fieldInfo
-		
+
 		for _, field := range fields {
 			originalName := field.GetName()
 			sanitizedName := sanitizeKeyword(originalName)
 			fieldNumber := field.GetNumber()
-			
+
 			// For already sanitized names (starting with _), keep the original prefix
 			if strings.HasPrefix(originalName, "_") {
 				sanitizedName = originalName
 			}
-			
+
 			allFields = append(allFields, fieldInfo{
 				originalName:  originalName,
 				sanitizedName: sanitizedName,
 				fieldNumber:   fieldNumber,
 			})
 		}
-		
+
 		// Second pass: ensure unique field names
 		for i := range allFields {
 			field := &allFields[i]
 			baseName := field.sanitizedName
 			counter := 1
-			
+
 			// Keep trying names until we find a unique one
 			for {
 				used := false
-				
+
 				// Check if this name is already used
 				for j := 0; j < i; j++ {
 					if allFields[j].sanitizedName == field.sanitizedName {
@@ -187,11 +193,11 @@ func (g *Generator) generateMessage(descriptor *descriptorpb.DescriptorProto, pa
 						break
 					}
 				}
-				
+
 				if !used {
 					break
 				}
-				
+
 				// Try next name variant
 				if strings.HasPrefix(baseName, "_") {
 					// For already sanitized names, append counter after the original name
@@ -202,11 +208,11 @@ func (g *Generator) generateMessage(descriptor *descriptorpb.DescriptorProto, pa
 				}
 				counter++
 			}
-			
+
 			usedFieldNames[field.sanitizedName] = true
 			fieldNameMap[field.fieldNumber] = field.sanitizedName
 		}
-		
+
 		// Generate fields with unique names
 		for _, field := range fields {
 			fieldName := fieldNameMap[field.GetNumber()]
@@ -228,7 +234,7 @@ func (g *Generator) generateMessage(descriptor *descriptorpb.DescriptorProto, pa
 					if err != nil {
 						return err
 					}
-					
+
 					wrapperName := fmt.Sprintf("%sEntry", strings.Title(fieldName))
 					if g.helperMessages[packageName] == nil {
 						g.helperMessages[packageName] = make(map[string]*descriptorpb.DescriptorProto)
@@ -237,14 +243,14 @@ func (g *Generator) generateMessage(descriptor *descriptorpb.DescriptorProto, pa
 						g.helperMessages[packageName][wrapperName] = g.createMapWrapperMessage(fieldName, keyType, valueType)
 						log.Printf("INFO: Generated wrapper message '%s' for map field '%s.%s'", wrapperName, structName, fieldName)
 					}
-					
+
 					// Store the mapping from original type name to wrapper name
 					originalTypeName := field.GetTypeName()
 					if len(originalTypeName) > 0 && originalTypeName[0] == '.' {
 						originalTypeName = originalTypeName[1:]
 					}
 					g.mapFieldMappings[originalTypeName] = wrapperName
-					
+
 					b.P(fmt.Sprintf("%s%s %s;", wrapperName, arrayStr, fieldName))
 				} else {
 					// Regular enum or message field
@@ -313,7 +319,7 @@ func (g *Generator) generateMessage(descriptor *descriptorpb.DescriptorProto, pa
 	// Generate codec library at the top level
 	b.P(fmt.Sprintf("library %sCodec {", structName))
 	b.Indent()
-	
+
 	// Only generate codec functions if we have fields
 	if len(fields) > 0 {
 		if g.generateFlag == generateFlagAll || g.generateFlag == generateFlagDecoder {
@@ -336,4 +342,4 @@ func (g *Generator) generateMessage(descriptor *descriptorpb.DescriptorProto, pa
 	b.P0()
 
 	return nil
-} 
+}
