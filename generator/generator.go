@@ -113,7 +113,7 @@ func New(request *pluginpb.CodeGeneratorRequest, versionString string) *Generato
 	g.generateFlag = generateFlagDecoder
 
 	// Default configuration
-	g.strictFieldNumberValidation = true
+	g.strictFieldNumberValidation = false // Allow empty messages by default
 	g.strictEnumValidation = true
 	g.allowEmptyPackedArrays = false
 	g.allowNonMonotonicFields = false
@@ -315,7 +315,7 @@ func (g *Generator) generateFile(protoFile *descriptorpb.FileDescriptorProto) (*
 	b.P0()
 
 	// Add imports at file level
-	b.P("import \"ProtobufLib.sol\";")
+	b.P(fmt.Sprintf("import \"ProtobufLib.sol\";"))
 
 	// Generate imports for dependencies
 	for _, dependency := range protoFile.GetDependency() {
@@ -506,14 +506,14 @@ func (g *Generator) dependencyToImportPath(dependency string) string {
 	// Convert path separators to forward slashes
 	dependency = strings.ReplaceAll(dependency, "\\", "/")
 
-	// Handle special case for ProtobufLib
+	// Handle ProtobufLib import
 	if dependency == "ProtobufLib" {
-		return "ProtobufLib.sol"
+		return "@lazyledger/protobuf3-solidity-lib/contracts/ProtobufLib.sol"
 	}
 
 	// Handle scoped packages (starting with @)
 	if strings.HasPrefix(dependency, "@") {
-		return fmt.Sprintf("%s.sol", dependency)
+		return dependency + ".sol"
 	}
 
 	// Handle node_modules imports
@@ -527,15 +527,8 @@ func (g *Generator) dependencyToImportPath(dependency string) string {
 		return fmt.Sprintf("%s.sol", strings.Join(parts, "/"))
 	}
 
-	// For local imports, use relative path based on package structure
-	if strings.Contains(dependency, "/") {
-		dir := filepath.Dir(dependency)
-		base := filepath.Base(dependency)
-		return fmt.Sprintf("%s/%s.sol", dir, base)
-	}
-
-	// For files in the same directory
-	return fmt.Sprintf("./%s.sol", dependency)
+	// For local imports, preserve directory structure
+	return dependency + ".sol"
 }
 
 // generateFloatDoubleHelpers generates helper functions for float/double fixed-point scaling
