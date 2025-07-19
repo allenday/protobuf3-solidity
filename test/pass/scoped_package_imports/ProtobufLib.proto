@@ -1,0 +1,6 @@
+syntax = "proto3";
+
+message ProtobufLib {
+  // Mock message for testing
+  string test_field = 1;
+} 

@@ -1,7 +1,6 @@
 syntax = "proto3";
 
-import "node_modules/@lazyledger/protobuf3-solidity-lib/contracts/ProtobufLib.sol";
-import "node_modules/@other-scope/package/lib/Message.sol";
+import "ProtobufLib.proto";
 
 message ScopedImportTest {
   string test_field = 1;
