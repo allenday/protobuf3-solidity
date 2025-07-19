@@ -253,14 +253,14 @@ func (g *Generator) generateMessage(descriptor *descriptorpb.DescriptorProto, pa
 					g.messageMappings[originalTypeName] = wrapperName
 
 					// Use the wrapper message type for the map field
-					b.P(fmt.Sprintf("%s%s %s;", arrayStr, wrapperName, fieldName))
+					b.P(fmt.Sprintf("%s%s %s;", wrapperName, arrayStr, fieldName))
 				} else {
 					// Handle regular enum or message field
 					typeName, err := g.getSolTypeName(field)
 					if err != nil {
 						return err
 					}
-					b.P(fmt.Sprintf("%s%s %s;", arrayStr, typeName, fieldName))
+					b.P(fmt.Sprintf("%s%s %s;", typeName, arrayStr, fieldName))
 				}
 			case descriptorpb.FieldDescriptorProto_TYPE_STRING:
 				// PostFiat enhancement: Use wrapper message for repeated strings
@@ -273,14 +273,14 @@ func (g *Generator) generateMessage(descriptor *descriptorpb.DescriptorProto, pa
 						g.helperMessages[packageName][wrapperName] = g.createStringWrapperMessage(fieldName)
 						log.Printf("INFO: Generated wrapper message '%s' for repeated string field '%s.%s'", wrapperName, structName, fieldName)
 					}
-					b.P(fmt.Sprintf("%s%s %s;", arrayStr, wrapperName, fieldName))
+					b.P(fmt.Sprintf("%s%s %s;", wrapperName, arrayStr, fieldName))
 				} else {
 					// Regular string field
 					fieldType, err := typeToSol(fieldDescriptorType)
 					if err != nil {
 						return errors.New(err.Error() + ": " + structName + "." + fieldName)
 					}
-					b.P(fmt.Sprintf("%s %s;", fieldType, fieldName))
+					b.P(fmt.Sprintf("%s%s %s;", fieldType, arrayStr, fieldName))
 				}
 			case descriptorpb.FieldDescriptorProto_TYPE_BYTES:
 				// PostFiat enhancement: Use wrapper message for repeated bytes
@@ -293,14 +293,14 @@ func (g *Generator) generateMessage(descriptor *descriptorpb.DescriptorProto, pa
 						g.helperMessages[packageName][wrapperName] = g.createBytesWrapperMessage(fieldName)
 						log.Printf("INFO: Generated wrapper message '%s' for repeated bytes field '%s.%s'", wrapperName, structName, fieldName)
 					}
-					b.P(fmt.Sprintf("%s%s %s;", arrayStr, wrapperName, fieldName))
+					b.P(fmt.Sprintf("%s%s %s;", wrapperName, arrayStr, fieldName))
 				} else {
 					// Regular bytes field
 					fieldType, err := typeToSol(fieldDescriptorType)
 					if err != nil {
 						return errors.New(err.Error() + ": " + structName + "." + fieldName)
 					}
-					b.P(fmt.Sprintf("%s %s;", fieldType, fieldName))
+					b.P(fmt.Sprintf("%s%s %s;", fieldType, arrayStr, fieldName))
 				}
 			default:
 				// Convert protobuf field type to Solidity native type
