@@ -1,0 +1,7 @@
+syntax = "proto3";
+
+package import_test;
+
+message Helper {
+  int32 helper_field = 1;
+} 

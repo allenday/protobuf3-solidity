@@ -1,0 +1,7 @@
+syntax = "proto3";
+
+package protobuf_lib;
+
+message ProtobufLibMessage {
+    // Mock message for testing
+} 

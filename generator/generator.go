@@ -315,7 +315,7 @@ func (g *Generator) generateFile(protoFile *descriptorpb.FileDescriptorProto) (*
 	b.P0()
 
 	// Add imports at file level
-	b.P("import \"ProtobufLib.sol\";")
+	b.P("import \"@lazyledger/protobuf3-solidity-lib/contracts/ProtobufLib.sol\";")
 
 	// Generate imports for dependencies
 	for _, dependency := range protoFile.GetDependency() {
@@ -508,7 +508,21 @@ func (g *Generator) dependencyToImportPath(dependency string) string {
 
 	// Handle ProtobufLib import
 	if dependency == "ProtobufLib" {
-		return "ProtobufLib.sol"
+		return "@lazyledger/protobuf3-solidity-lib/contracts/ProtobufLib.sol"
+	}
+
+	// Handle scoped packages (starting with @)
+	if strings.HasPrefix(dependency, "@") {
+		return dependency + ".sol"
+	}
+
+	// Handle node_modules imports
+	if strings.Contains(dependency, "node_modules/") {
+		// Remove node_modules/ prefix and convert to package import
+		parts := strings.Split(dependency, "node_modules/")
+		if len(parts) > 1 {
+			return parts[1] + ".sol"
+		}
 	}
 
 	// For local imports, preserve directory structure

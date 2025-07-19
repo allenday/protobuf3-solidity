@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package import_test;
+
+// Test different import scenarios
+import "helper.proto";     // Local file
+import "subfolder/nested.proto";  // Nested file
+import "ProtobufLib.proto";  // Local library
+
+message MainMessage {
+  Helper helper = 1;
+  Nested nested = 2;
+} 

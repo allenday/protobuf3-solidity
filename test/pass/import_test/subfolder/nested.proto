@@ -1,0 +1,7 @@
+syntax = "proto3";
+
+package import_test;
+
+message Nested {
+  int32 nested_field = 1;
+} 
