@@ -73,7 +73,7 @@ type Generator struct {
 	licenseString string
 	compileFlag   compileFlag
 	generateFlag  generateFlag
-	
+
 	// Enhanced features for PostFiat support
 	helperMessages map[string]map[string]*descriptorpb.DescriptorProto // package -> message name -> descriptor (only wrapper messages)
 	// Track map field type mappings: original type name -> wrapper name
@@ -82,15 +82,15 @@ type Generator struct {
 	enumMappings map[string]string
 	// Track nested message name mappings: original nested name -> flattened name
 	messageMappings map[string]string
-	
+
 	// Global message registry for type resolution
 	messageRegistry map[string]*descriptorpb.DescriptorProto
-	
+
 	// Configuration options
 	strictFieldNumberValidation bool
-	strictEnumValidation       bool
-	allowEmptyPackedArrays     bool
-	allowNonMonotonicFields    bool
+	strictEnumValidation        bool
+	allowEmptyPackedArrays      bool
+	allowNonMonotonicFields     bool
 }
 
 // New initializes a new Generator.
@@ -110,7 +110,7 @@ func New(request *pluginpb.CodeGeneratorRequest, versionString string) *Generato
 
 	g.compileFlag = compileFlagCompile
 	g.generateFlag = generateFlagDecoder
-	
+
 	// Default configuration
 	g.strictFieldNumberValidation = true
 	g.strictEnumValidation = true
@@ -212,7 +212,7 @@ func (g *Generator) Generate() (*pluginpb.CodeGeneratorResponse, error) {
 			continue
 		}
 		log.Printf("DEBUG: File %d: %s (package: %s, messages: %d)", i, protoFile.GetName(), protoFile.GetPackage(), len(protoFile.GetMessageType()))
-		
+
 		// Clear helper messages for this package before processing
 		packageName := protoFile.GetPackage()
 		if packageMessages, exists := g.helperMessages[packageName]; exists {
@@ -221,7 +221,7 @@ func (g *Generator) Generate() (*pluginpb.CodeGeneratorResponse, error) {
 			}
 			delete(g.helperMessages, packageName)
 		}
-		
+
 		// Process the file
 		responseFile, err := g.generateFile(protoFile)
 		if err != nil {
@@ -235,7 +235,7 @@ func (g *Generator) Generate() (*pluginpb.CodeGeneratorResponse, error) {
 		} else {
 			log.Printf("DEBUG: Skipped file %s (no output generated)", protoFile.GetName())
 		}
-		
+
 		// Clear helper messages after processing the file
 		if packageMessages, exists := g.helperMessages[packageName]; exists {
 			for wrapperName := range packageMessages {
@@ -276,16 +276,32 @@ func (g *Generator) generateFile(protoFile *descriptorpb.FileDescriptorProto) (*
 		// and may use proto2 syntax or have complex nested structures
 		return nil, nil
 	}
-	
+
 	// Only support proto3
 	syntax := protoFile.GetSyntax()
 	if len(syntax) == 0 {
 		return nil, fmt.Errorf("file %s has no syntax declaration", fileName)
 	}
-	
+
 	err := checkSyntaxVersion(syntax)
 	if err != nil {
 		return nil, fmt.Errorf("file %s: %v", fileName, err)
+	}
+
+	// Validate field numbers in all messages if strict validation is enabled
+	if g.strictFieldNumberValidation {
+		for _, descriptor := range protoFile.GetMessageType() {
+			if err := checkFieldNumbers(descriptor.GetField(), g.strictFieldNumberValidation); err != nil {
+				return nil, fmt.Errorf("invalid field numbers in message '%s': %v", descriptor.GetName(), err)
+			}
+		}
+	}
+
+	// Validate repeated numeric fields are packed
+	for _, descriptor := range protoFile.GetMessageType() {
+		if err := checkRepeatedNumericFields(descriptor.GetField()); err != nil {
+			return nil, fmt.Errorf("invalid field in message '%s': %v", descriptor.GetName(), err)
+		}
 	}
 
 	// Buffer to hold the generate file's text
@@ -310,7 +326,7 @@ func (g *Generator) generateFile(protoFile *descriptorpb.FileDescriptorProto) (*
 
 	// Generate imports
 	b.P("import \"@lazyledger/protobuf3-solidity-lib/contracts/ProtobufLib.sol\";")
-	
+
 	// Generate imports for dependencies
 	for _, dependency := range protoFile.GetDependency() {
 		// Convert dependency path to import path
@@ -334,7 +350,7 @@ func (g *Generator) generateFile(protoFile *descriptorpb.FileDescriptorProto) (*
 			return nil, err
 		}
 	}
-	
+
 	// Generate wrapper messages (Entry/List) if any exist
 	if packageMessages, exists := g.helperMessages[packageName]; exists && len(packageMessages) > 0 {
 		// Collect only wrapper messages
@@ -344,12 +360,12 @@ func (g *Generator) generateFile(protoFile *descriptorpb.FileDescriptorProto) (*
 				wrapperMessages = append(wrapperMessages, wrapperDescriptor)
 			}
 		}
-		
+
 		// Only generate helper messages section if we have wrapper messages
 		if len(wrapperMessages) > 0 {
 			b.P("// Helper messages for PostFiat enhancements")
 			b.P0()
-			
+
 			for _, wrapperDescriptor := range wrapperMessages {
 				err := g.generateMessage(wrapperDescriptor, packageName, b)
 				if err != nil {
@@ -357,7 +373,7 @@ func (g *Generator) generateFile(protoFile *descriptorpb.FileDescriptorProto) (*
 				}
 			}
 		}
-		
+
 		// Clear helper messages after generation to prevent duplicates
 		for wrapperName := range packageMessages {
 			delete(packageMessages, wrapperName)
@@ -406,7 +422,7 @@ func (g *Generator) generateService(service *descriptorpb.ServiceDescriptorProto
 		}
 
 		// Generate method signature
-		b.P(fmt.Sprintf("function %s(%s memory request) external pure returns (%s memory);", 
+		b.P(fmt.Sprintf("function %s(%s memory request) external pure returns (%s memory);",
 			methodName, inputTypeName, outputTypeName))
 	}
 
@@ -415,7 +431,7 @@ func (g *Generator) generateService(service *descriptorpb.ServiceDescriptorProto
 	b.P()
 
 	return nil
-} 
+}
 
 // packageToLibraryName converts a protobuf package name to a valid Solidity library name
 func (g *Generator) packageToLibraryName(packageName string) string {
@@ -432,19 +448,19 @@ func (g *Generator) packageToLibraryName(packageName string) string {
 // resolveTypeName resolves a protobuf type name to a Solidity type name with package support
 func (g *Generator) resolveTypeName(typeName string) (string, error) {
 	log.Printf("DEBUG: resolveTypeName called with typeName: '%s'", typeName)
-	
+
 	if len(typeName) == 0 {
 		log.Printf("WARNING: Empty type name passed to resolveTypeName, using default type")
 		// Workaround for corrupted descriptors: use a default type name
 		return "UnknownType", nil
 	}
-	
+
 	// Remove leading dot
 	if typeName[0] == '.' {
 		typeName = typeName[1:]
 		log.Printf("DEBUG: Removed leading dot, typeName now: '%s'", typeName)
 	}
-	
+
 	// Handle package-qualified type names
 	// Format: "package.name.TypeName" -> "Package_Name.TypeName"
 	if strings.Contains(typeName, ".") {
@@ -453,7 +469,7 @@ func (g *Generator) resolveTypeName(typeName string) (string, error) {
 			// Convert package name to library name format
 			packageParts := parts[:len(parts)-1]
 			typeNamePart := parts[len(parts)-1]
-			
+
 			// Convert package parts to library name format
 			for i, part := range packageParts {
 				if len(part) > 0 {
@@ -461,14 +477,14 @@ func (g *Generator) resolveTypeName(typeName string) (string, error) {
 				}
 			}
 			libraryName := strings.Join(packageParts, "_")
-			
+
 			// Return library-qualified type name
 			result := fmt.Sprintf("%s.%s", libraryName, typeNamePart)
 			log.Printf("DEBUG: Package-qualified type resolved to: '%s'", result)
 			return result, nil
 		}
 	}
-	
+
 	log.Printf("DEBUG: Simple type name resolved to: '%s'", typeName)
 	return typeName, nil
 }
@@ -479,21 +495,21 @@ func (g *Generator) dependencyToImportPath(dependency string) string {
 	if strings.HasSuffix(dependency, ".proto") {
 		dependency = strings.TrimSuffix(dependency, ".proto")
 	}
-	
+
 	// For now, assume relative imports in the same directory
 	// In a more sophisticated implementation, this could:
 	// 1. Look up the package name of the dependency
 	// 2. Generate appropriate import paths based on package structure
 	// 3. Handle different import strategies (relative vs absolute)
-	
+
 	return fmt.Sprintf("./%s.sol", dependency)
-} 
+}
 
 // generateFloatDoubleHelpers generates helper functions for float/double fixed-point scaling
 func (g *Generator) generateFloatDoubleHelpers(b *WriteableBuffer) {
 	b.P("// Helper functions for float/double fixed-point scaling")
 	b.P0()
-	
+
 	// Float scaling helper (1e6 precision)
 	b.P("function decode_float_scaled(uint64 pos, bytes memory buf) internal pure returns (bool, uint64, int32) {")
 	b.Indent()
@@ -663,4 +679,4 @@ func (g *Generator) generateFloatDoubleHelpers(b *WriteableBuffer) {
 	b.Unindent()
 	b.P("}")
 	b.P0()
-} 
+}
