@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package import_test;
+
+// Test that ProtobufLib import is handled correctly
+import "ProtobufLib.proto";
+
+message EvmBridgeMessage {
+    // Use ProtobufLib message to verify import handling
+    protobuf_lib.ProtobufLibMessage lib = 1;
+} 

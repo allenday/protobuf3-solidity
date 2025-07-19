@@ -92,6 +92,7 @@ type Generator struct {
 	strictEnumValidation        bool
 	allowEmptyPackedArrays      bool
 	allowNonMonotonicFields     bool
+	protobufLibImportPath       string // Import path for ProtobufLib.sol
 }
 
 // New initializes a new Generator.
@@ -117,6 +118,7 @@ func New(request *pluginpb.CodeGeneratorRequest, versionString string) *Generato
 	g.strictEnumValidation = true
 	g.allowEmptyPackedArrays = false
 	g.allowNonMonotonicFields = false
+	g.protobufLibImportPath = "ProtobufLib.sol" // Default import path
 
 	return g
 }
@@ -185,6 +187,8 @@ func (g *Generator) ParseParameters() error {
 			} else {
 				return errors.New("allow_non_monotonic_fields must be 'true' or 'false'")
 			}
+		case "protobuf_lib_import":
+			g.protobufLibImportPath = value
 		default:
 			return errors.New("unrecognized option " + key)
 		}
@@ -315,18 +319,22 @@ func (g *Generator) generateFile(protoFile *descriptorpb.FileDescriptorProto) (*
 	b.P0()
 
 	// Add imports at file level
-	b.P("import \"ProtobufLib.sol\";")
+	b.P(fmt.Sprintf("import \"%s\";", g.protobufLibImportPath))
+
+	// Track imported files to avoid duplicates
+	importedFiles := make(map[string]bool)
+	importedFiles[g.protobufLibImportPath] = true
 
 	// Generate imports for dependencies
 	for _, dependency := range protoFile.GetDependency() {
 		if strings.HasPrefix(dependency, "google/protobuf/") || strings.HasPrefix(dependency, "google/api/") {
 			continue
 		}
-		if dependency == "ProtobufLib.proto" {
-			continue // Skip ProtobufLib import as it's already added
-		}
 		importPath := g.dependencyToImportPath(dependency)
-		b.P(fmt.Sprintf("import \"%s\";", importPath))
+		if !importedFiles[importPath] {
+			b.P(fmt.Sprintf("import \"%s\";", importPath))
+			importedFiles[importPath] = true
+		}
 	}
 
 	if len(protoFile.GetDependency()) > 0 {
@@ -511,7 +519,7 @@ func (g *Generator) dependencyToImportPath(dependency string) string {
 
 	// Handle ProtobufLib import
 	if dependency == "ProtobufLib" {
-		return "ProtobufLib.sol"
+		return g.protobufLibImportPath
 	}
 
 	// For local imports, preserve directory structure
