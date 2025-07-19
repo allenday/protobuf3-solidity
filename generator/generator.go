@@ -188,7 +188,7 @@ func (g *Generator) ParseParameters() error {
 				return errors.New("allow_non_monotonic_fields must be 'true' or 'false'")
 			}
 		case "protobuf_lib_import":
-			// Extract base name and enforce local import
+			// Always use local import path
 			parts := strings.Split(value, "/")
 			baseName := parts[len(parts)-1]
 			if !strings.HasSuffix(baseName, ".sol") {
@@ -325,11 +325,11 @@ func (g *Generator) generateFile(protoFile *descriptorpb.FileDescriptorProto) (*
 	b.P0()
 
 	// Add imports at file level
-	b.P(fmt.Sprintf("import \"%s\";", g.protobufLibImportPath))
+	b.P(fmt.Sprintf("import \"%s\";", g.dependencyToImportPath("ProtobufLib")))
 
 	// Track imported files to avoid duplicates
 	importedFiles := make(map[string]bool)
-	importedFiles[g.protobufLibImportPath] = true
+	importedFiles[g.dependencyToImportPath("ProtobufLib")] = true
 
 	// Generate imports for dependencies
 	for _, dependency := range protoFile.GetDependency() {
@@ -525,18 +525,10 @@ func (g *Generator) dependencyToImportPath(dependency string) string {
 
 	// Handle ProtobufLib import
 	if dependency == "ProtobufLib" {
-		return "ProtobufLib.sol"
+		return g.protobufLibImportPath
 	}
 
-	// Handle scoped packages and node_modules imports
-	if strings.HasPrefix(dependency, "@") || strings.Contains(dependency, "node_modules/") {
-		// Extract the base name and use local import
-		parts := strings.Split(dependency, "/")
-		baseName := parts[len(parts)-1]
-		return baseName + ".sol"
-	}
-
-	// For local imports, preserve directory structure
+	// For all other imports, use local paths
 	return dependency + ".sol"
 }
 
