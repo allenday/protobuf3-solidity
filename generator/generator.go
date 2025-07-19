@@ -388,7 +388,7 @@ func (g *Generator) generateFile(protoFile *descriptorpb.FileDescriptorProto) (*
 		outFileName = fmt.Sprintf("%s.sol", packagePath)
 	} else {
 		// For files without package, use the file name without .proto
-		outFileName = strings.TrimSuffix(fileName, ".proto") + ".sol"
+		outFileName = strings.TrimSuffix(strings.TrimSuffix(fileName, ".proto"), ".proto") + ".sol"
 	}
 
 	outFile := &pluginpb.CodeGeneratorResponse_File{
@@ -515,21 +515,26 @@ func (g *Generator) dependencyToImportPath(dependency string) string {
 				if strings.HasPrefix(components[i+1], "@") && i+2 < len(components) {
 					// Scoped package
 					packageName = components[i+1] + "/" + components[i+2]
+					// Get the remaining path after the package name
+					if i+3 < len(components) {
+						return fmt.Sprintf("%s/%s.sol", packageName, strings.Join(components[i+3:], "/"))
+					}
+					return fmt.Sprintf("%s/index.sol", packageName)
 				} else {
 					// Regular package
 					packageName = components[i+1]
+					// Get the remaining path after the package name
+					if i+2 < len(components) {
+						return fmt.Sprintf("%s/%s.sol", packageName, strings.Join(components[i+2:], "/"))
+					}
+					return fmt.Sprintf("%s/index.sol", packageName)
 				}
-				break
 			}
-		}
-		if packageName != "" {
-			return fmt.Sprintf("%s/solidity/%s.sol", packageName, components[len(components)-1])
 		}
 	}
 
-	// For local imports, use the file name as is
-	fileName := components[len(components)-1]
-	return fmt.Sprintf("./%s.sol", fileName)
+	// For local imports, use relative path with .sol extension
+	return fmt.Sprintf("./%s.sol", dependency)
 }
 
 // generateFloatDoubleHelpers generates helper functions for float/double fixed-point scaling
