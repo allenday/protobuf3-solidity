@@ -322,6 +322,9 @@ func (g *Generator) generateFile(protoFile *descriptorpb.FileDescriptorProto) (*
 		if strings.HasPrefix(dependency, "google/protobuf/") || strings.HasPrefix(dependency, "google/api/") {
 			continue
 		}
+		if dependency == "ProtobufLib.proto" {
+			continue // Skip ProtobufLib import as it's already added
+		}
 		importPath := g.dependencyToImportPath(dependency)
 		b.P(fmt.Sprintf("import \"%s\";", importPath))
 	}
