@@ -25,3 +25,4 @@ venv/
 .venv/
 proto/
 test_output/
+cmd/protoc-gen-sol/main

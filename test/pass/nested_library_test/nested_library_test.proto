@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package nested_library_test;
+
+message ParentMessage {
+    string name = 1;
+    
+    message NestedMessage {
+        string value = 1;
+        NestedEnum type = 2;
+        
+        enum NestedEnum {
+            UNKNOWN = 0;
+            VALUE_1 = 1;
+            VALUE_2 = 2;
+        }
+    }
+    
+    NestedMessage nested = 2;
+    repeated NestedMessage nested_list = 3;
+} 

@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"path/filepath"
 	"strings"
 
 	"google.golang.org/protobuf/proto"
@@ -76,7 +75,7 @@ type Generator struct {
 	generateFlag  generateFlag
 	
 	// Enhanced features for PostFiat support
-	helperMessages map[string]map[string]*descriptorpb.DescriptorProto // package -> message name -> descriptor
+	helperMessages map[string]map[string]*descriptorpb.DescriptorProto // package -> message name -> descriptor (only wrapper messages)
 	// Track map field type mappings: original type name -> wrapper name
 	mapFieldMappings map[string]string
 	// Track nested enum name mappings: original nested name -> flattened name
@@ -84,14 +83,14 @@ type Generator struct {
 	// Track nested message name mappings: original nested name -> flattened name
 	messageMappings map[string]string
 	
+	// Global message registry for type resolution
+	messageRegistry map[string]*descriptorpb.DescriptorProto
+	
 	// Configuration options
 	strictFieldNumberValidation bool
 	strictEnumValidation       bool
 	allowEmptyPackedArrays     bool
 	allowNonMonotonicFields    bool
-	
-	// Global message registry for type resolution
-	messageRegistry map[string]*descriptorpb.DescriptorProto
 }
 
 // New initializes a new Generator.
@@ -213,10 +212,17 @@ func (g *Generator) Generate() (*pluginpb.CodeGeneratorResponse, error) {
 			continue
 		}
 		log.Printf("DEBUG: File %d: %s (package: %s, messages: %d)", i, protoFile.GetName(), protoFile.GetPackage(), len(protoFile.GetMessageType()))
-		for j, msg := range protoFile.GetMessageType() {
-			log.Printf("DEBUG:   Message %d: %s (%d fields)", j, msg.GetName(), len(msg.GetField()))
+		
+		// Clear helper messages for this package before processing
+		packageName := protoFile.GetPackage()
+		if packageMessages, exists := g.helperMessages[packageName]; exists {
+			for wrapperName := range packageMessages {
+				delete(packageMessages, wrapperName)
+			}
+			delete(g.helperMessages, packageName)
 		}
-		log.Printf("DEBUG: About to process file %d: %s", i, protoFile.GetName())
+		
+		// Process the file
 		responseFile, err := g.generateFile(protoFile)
 		if err != nil {
 			log.Printf("ERROR: Failed to process file %d (%s): %v", i, protoFile.GetName(), err)
@@ -229,6 +235,14 @@ func (g *Generator) Generate() (*pluginpb.CodeGeneratorResponse, error) {
 		} else {
 			log.Printf("DEBUG: Skipped file %s (no output generated)", protoFile.GetName())
 		}
+		
+		// Clear helper messages after processing the file
+		if packageMessages, exists := g.helperMessages[packageName]; exists {
+			for wrapperName := range packageMessages {
+				delete(packageMessages, wrapperName)
+			}
+			delete(g.helperMessages, packageName)
+		}
 	}
 
 	return response, nil
@@ -236,16 +250,18 @@ func (g *Generator) Generate() (*pluginpb.CodeGeneratorResponse, error) {
 
 // buildGlobalMessageRegistry builds a registry of all messages for type resolution
 func (g *Generator) buildGlobalMessageRegistry(protoFiles []*descriptorpb.FileDescriptorProto) {
-	if g.helperMessages == nil {
-		g.helperMessages = make(map[string]map[string]*descriptorpb.DescriptorProto)
+	if g.messageRegistry == nil {
+		g.messageRegistry = make(map[string]*descriptorpb.DescriptorProto)
 	}
 	for _, protoFile := range protoFiles {
 		pkg := protoFile.GetPackage()
-		if _, ok := g.helperMessages[pkg]; !ok {
-			g.helperMessages[pkg] = make(map[string]*descriptorpb.DescriptorProto)
-		}
 		for _, msg := range protoFile.GetMessageType() {
-			g.helperMessages[pkg][msg.GetName()] = msg
+			// Use fully qualified name for global registry
+			fullName := msg.GetName()
+			if len(pkg) > 0 {
+				fullName = pkg + "." + fullName
+			}
+			g.messageRegistry[fullName] = msg
 		}
 	}
 }
@@ -280,7 +296,7 @@ func (g *Generator) generateFile(protoFile *descriptorpb.FileDescriptorProto) (*
 	b.P(fmt.Sprintf("// SPDX-License-Identifier: %s", g.licenseString))
 	b.P("pragma solidity " + SolidityVersionString + ";")
 	b.P(SolidityABIString)
-	b.P()
+	b.P0()
 
 	// Handle package namespace
 	packageName := protoFile.GetPackage()
@@ -288,7 +304,7 @@ func (g *Generator) generateFile(protoFile *descriptorpb.FileDescriptorProto) (*
 		// Generate package namespace
 		b.P(fmt.Sprintf("// Package: %s", packageName))
 		b.P(fmt.Sprintf("library %s {", g.packageToLibraryName(packageName)))
-		b.P()
+		b.P0()
 		b.Indent()
 	}
 
@@ -301,7 +317,7 @@ func (g *Generator) generateFile(protoFile *descriptorpb.FileDescriptorProto) (*
 		importPath := g.dependencyToImportPath(dependency)
 		b.P(fmt.Sprintf("import \"%s\";", importPath))
 	}
-	b.P()
+	b.P0()
 
 	// Generate enums
 	for _, descriptor := range protoFile.GetEnumType() {
@@ -311,59 +327,60 @@ func (g *Generator) generateFile(protoFile *descriptorpb.FileDescriptorProto) (*
 		}
 	}
 
-	// Generate messages
+	// Generate regular messages
 	for _, descriptor := range protoFile.GetMessageType() {
-		// Debug: Print message name and field count
-		log.Printf("DEBUG: Processing message '%s' with %d fields", descriptor.GetName(), len(descriptor.GetField()))
-		
 		err := g.generateMessage(descriptor, packageName, b)
 		if err != nil {
 			return nil, err
 		}
 	}
-
-	// PostFiat enhancement: Generate helper messages for maps and repeated strings
-	if len(g.helperMessages) > 0 {
-		b.P("// Helper messages for PostFiat enhancements")
-		b.P()
+	
+	// Generate wrapper messages (Entry/List) if any exist
+	if packageMessages, exists := g.helperMessages[packageName]; exists && len(packageMessages) > 0 {
+		// Collect only wrapper messages
+		wrapperMessages := make([]*descriptorpb.DescriptorProto, 0)
+		for wrapperName, wrapperDescriptor := range packageMessages {
+			if strings.HasSuffix(wrapperName, "Entry") || strings.HasSuffix(wrapperName, "List") {
+				wrapperMessages = append(wrapperMessages, wrapperDescriptor)
+			}
+		}
 		
-		// Get the current package name
-		if packageMessages, exists := g.helperMessages[packageName]; exists {
-			for _, wrapperDescriptor := range packageMessages {
+		// Only generate helper messages section if we have wrapper messages
+		if len(wrapperMessages) > 0 {
+			b.P("// Helper messages for PostFiat enhancements")
+			b.P0()
+			
+			for _, wrapperDescriptor := range wrapperMessages {
 				err := g.generateMessage(wrapperDescriptor, packageName, b)
 				if err != nil {
 					return nil, err
 				}
 			}
 		}
+		
+		// Clear helper messages after generation to prevent duplicates
+		for wrapperName := range packageMessages {
+			delete(packageMessages, wrapperName)
+		}
+		delete(g.helperMessages, packageName)
 	}
 
 	// Generate float/double scaling helper functions
 	g.generateFloatDoubleHelpers(b)
 
-	// Generate services (PostFiat enhancement)
-	for _, service := range protoFile.GetService() {
-		err := g.generateService(service, b)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	// Close package namespace if it was opened
+	// Close package namespace
 	if len(packageName) > 0 {
 		b.Unindent()
 		b.P("}")
-		b.P()
+		b.P0()
 	}
 
-	// Generate output file
-	outputFileName := strings.TrimSuffix(protoFile.GetName(), ".proto") + ".sol"
-	outputFileName = filepath.Base(outputFileName)
+	// Create response file
+	responseFile := &pluginpb.CodeGeneratorResponse_File{}
+	responseFile.Name = proto.String(strings.TrimSuffix(fileName, ".proto") + ".sol")
+	responseFile.Content = proto.String(b.String())
 
-	return &pluginpb.CodeGeneratorResponse_File{
-		Name:    &outputFileName,
-		Content: proto.String(b.String()),
-	}, nil
+	return responseFile, nil
 }
 
 // generateService generates Solidity interface code from a protobuf service descriptor
@@ -470,4 +487,180 @@ func (g *Generator) dependencyToImportPath(dependency string) string {
 	// 3. Handle different import strategies (relative vs absolute)
 	
 	return fmt.Sprintf("./%s.sol", dependency)
+} 
+
+// generateFloatDoubleHelpers generates helper functions for float/double fixed-point scaling
+func (g *Generator) generateFloatDoubleHelpers(b *WriteableBuffer) {
+	b.P("// Helper functions for float/double fixed-point scaling")
+	b.P0()
+	
+	// Float scaling helper (1e6 precision)
+	b.P("function decode_float_scaled(uint64 pos, bytes memory buf) internal pure returns (bool, uint64, int32) {")
+	b.Indent()
+	b.P("bool success;")
+	b.P("uint64 new_pos;")
+	b.P("uint32 raw_value;")
+	b.P("(success, new_pos, raw_value) = ProtobufLib.decode_fixed32(pos, buf);")
+	b.P("if (!success) {")
+	b.Indent()
+	b.P("return (false, pos, 0);")
+	b.Unindent()
+	b.P("}")
+	b.P0()
+
+	b.P("// Convert IEEE 754 float to fixed-point int32 with 1e6 scaling")
+	b.P("// This preserves 6 decimal places of precision")
+	b.P("int32 scaled_value;")
+	b.P("assembly {")
+	b.Indent()
+	b.P("// Extract sign, exponent, and mantissa from IEEE 754")
+	b.P("let sign := shr(31, raw_value)")
+	b.P("let exponent := and(shr(23, raw_value), 0xFF)")
+	b.P("let mantissa := and(raw_value, 0x7FFFFF)")
+	b.P0()
+
+	b.P("// Handle special cases")
+	b.P("if eq(exponent, 0) {")
+	b.Indent()
+	b.P("// Zero or denormalized")
+	b.P("scaled_value := 0")
+	b.Unindent()
+	b.P("}")
+	b.P("if eq(exponent, 0xFF) {")
+	b.Indent()
+	b.P("// Infinity or NaN - return max value")
+	b.P("scaled_value := 0x7FFFFFFF")
+	b.Unindent()
+	b.P("}")
+	b.P0()
+
+	b.P("// Normal case: convert to fixed-point")
+	b.P("// Add implicit leading 1 to mantissa")
+	b.P("mantissa := or(mantissa, 0x800000)")
+	b.P0()
+
+	b.P("// Calculate actual value: mantissa * 2^(exponent-127)")
+	b.P("let shift := sub(exponent, 127)")
+	b.P("let scaled_mantissa := mantissa")
+	b.P0()
+
+	b.P("// Apply scaling factor of 1e6 (1,000,000)")
+	b.P("scaled_mantissa := mul(scaled_mantissa, 1000000)")
+	b.P0()
+
+	b.P("// Apply exponent shift")
+	b.P("if gt(shift, 0) {")
+	b.Indent()
+	b.P("scaled_mantissa := shl(shift, scaled_mantissa)")
+	b.Unindent()
+	b.P("}")
+	b.P("if lt(shift, 0) {")
+	b.Indent()
+	b.P("scaled_mantissa := shr(sub(0, shift), scaled_mantissa)")
+	b.Unindent()
+	b.P("}")
+	b.P0()
+
+	b.P("// Apply sign")
+	b.P("if sign {")
+	b.Indent()
+	b.P("scaled_mantissa := mul(scaled_mantissa, -1)")
+	b.Unindent()
+	b.P("}")
+	b.P0()
+
+	b.P("scaled_value := scaled_mantissa")
+	b.Unindent()
+	b.P("}")
+	b.P0()
+
+	b.P("return (true, new_pos, scaled_value);")
+	b.Unindent()
+	b.P("}")
+	b.P0()
+
+	// Double scaling helper (1e15 precision)
+	b.P("function decode_double_scaled(uint64 pos, bytes memory buf) internal pure returns (bool, uint64, int64) {")
+	b.Indent()
+	b.P("bool success;")
+	b.P("uint64 new_pos;")
+	b.P("uint64 raw_value;")
+	b.P("(success, new_pos, raw_value) = ProtobufLib.decode_fixed64(pos, buf);")
+	b.P("if (!success) {")
+	b.Indent()
+	b.P("return (false, pos, 0);")
+	b.Unindent()
+	b.P("}")
+	b.P0()
+
+	b.P("// Convert IEEE 754 double to fixed-point int64 with 1e15 scaling")
+	b.P("// This preserves 15 decimal places of precision")
+	b.P("int64 scaled_value;")
+	b.P("assembly {")
+	b.Indent()
+	b.P("// Extract sign, exponent, and mantissa from IEEE 754")
+	b.P("let sign := shr(63, raw_value)")
+	b.P("let exponent := and(shr(52, raw_value), 0x7FF)")
+	b.P("let mantissa := and(raw_value, 0xFFFFFFFFFFFFF)")
+	b.P0()
+
+	b.P("// Handle special cases")
+	b.P("if eq(exponent, 0) {")
+	b.Indent()
+	b.P("// Zero or denormalized")
+	b.P("scaled_value := 0")
+	b.Unindent()
+	b.P("}")
+	b.P("if eq(exponent, 0x7FF) {")
+	b.Indent()
+	b.P("// Infinity or NaN - return max value")
+	b.P("scaled_value := 0x7FFFFFFFFFFFFFFF")
+	b.Unindent()
+	b.P("}")
+	b.P0()
+
+	b.P("// Normal case: convert to fixed-point")
+	b.P("// Add implicit leading 1 to mantissa")
+	b.P("mantissa := or(mantissa, 0x10000000000000)")
+	b.P0()
+
+	b.P("// Calculate actual value: mantissa * 2^(exponent-1023)")
+	b.P("let shift := sub(exponent, 1023)")
+	b.P("let scaled_mantissa := mantissa")
+	b.P0()
+
+	b.P("// Apply scaling factor of 1e15 (1,000,000,000,000,000)")
+	b.P("scaled_mantissa := mul(scaled_mantissa, 1000000000000000)")
+	b.P0()
+
+	b.P("// Apply exponent shift")
+	b.P("if gt(shift, 0) {")
+	b.Indent()
+	b.P("scaled_mantissa := shl(shift, scaled_mantissa)")
+	b.Unindent()
+	b.P("}")
+	b.P("if lt(shift, 0) {")
+	b.Indent()
+	b.P("scaled_mantissa := shr(sub(0, shift), scaled_mantissa)")
+	b.Unindent()
+	b.P("}")
+	b.P0()
+
+	b.P("// Apply sign")
+	b.P("if sign {")
+	b.Indent()
+	b.P("scaled_mantissa := mul(scaled_mantissa, -1)")
+	b.Unindent()
+	b.P("}")
+	b.P0()
+
+	b.P("scaled_value := scaled_mantissa")
+	b.Unindent()
+	b.P("}")
+	b.P0()
+
+	b.P("return (true, new_pos, scaled_value);")
+	b.Unindent()
+	b.P("}")
+	b.P0()
 } 
