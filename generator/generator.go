@@ -314,7 +314,7 @@ func (g *Generator) generateFile(protoFile *descriptorpb.FileDescriptorProto) (*
 	b.P0()
 
 	// Add imports at file level
-	b.P("import \"./ProtobufLib.sol\";")
+	b.P("import \"@protobuf3-solidity-lib/contracts/ProtobufLib.sol\";")
 
 	// Generate imports for dependencies
 	for _, dependency := range protoFile.GetDependency() {
@@ -380,8 +380,17 @@ func (g *Generator) generateFile(protoFile *descriptorpb.FileDescriptorProto) (*
 	b.P("}")
 	b.P0()
 
-	// Create response file
-	outFileName := strings.TrimSuffix(fileName, ".proto") + ".sol"
+	// Create response file with package-based naming
+	var outFileName string
+	if len(packageName) > 0 {
+		// Convert package name to path format
+		packagePath := strings.ReplaceAll(packageName, ".", "/")
+		outFileName = fmt.Sprintf("%s.sol", packagePath)
+	} else {
+		// For files without package, use the file name without .proto
+		outFileName = strings.TrimSuffix(fileName, ".proto") + ".sol"
+	}
+
 	outFile := &pluginpb.CodeGeneratorResponse_File{
 		Name:    &outFileName,
 		Content: proto.String(b.String()),
@@ -498,12 +507,29 @@ func (g *Generator) dependencyToImportPath(dependency string) string {
 
 	// Handle node_modules imports
 	if strings.Contains(dependency, "node_modules") {
-		// Keep the node_modules path as is
-		return fmt.Sprintf("%s.proto.sol", dependency)
+		// Extract the package name from node_modules path
+		// e.g., "node_modules/@scope/package/file" -> "@scope/package"
+		var packageName string
+		for i, comp := range components {
+			if comp == "node_modules" && i+1 < len(components) {
+				if strings.HasPrefix(components[i+1], "@") && i+2 < len(components) {
+					// Scoped package
+					packageName = components[i+1] + "/" + components[i+2]
+				} else {
+					// Regular package
+					packageName = components[i+1]
+				}
+				break
+			}
+		}
+		if packageName != "" {
+			return fmt.Sprintf("%s/solidity/%s.sol", packageName, components[len(components)-1])
+		}
 	}
 
-	// For relative imports, use proper relative path
-	return fmt.Sprintf("./%s.proto.sol", components[len(components)-1])
+	// For local imports, use the package name to determine the path
+	packageName := strings.ReplaceAll(dependency, "/", "_")
+	return fmt.Sprintf("@protobuf3-solidity-lib/contracts/%s.sol", packageName)
 }
 
 // generateFloatDoubleHelpers generates helper functions for float/double fixed-point scaling
