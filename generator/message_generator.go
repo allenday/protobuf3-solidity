@@ -83,11 +83,6 @@ func (g *Generator) generateFlattenedMessage(descriptor *descriptorpb.Descriptor
 
 // generateMessage generates Solidity code for a protobuf message.
 func (g *Generator) generateMessage(descriptor *descriptorpb.DescriptorProto, packageName string, b *WriteableBuffer) error {
-	// Reject empty messages
-	if len(descriptor.GetField()) == 0 {
-		return fmt.Errorf("message '%s' must contain at least one field", descriptor.GetName())
-	}
-
 	structName := sanitizeKeyword(descriptor.GetName())
 	fields := descriptor.GetField()
 
