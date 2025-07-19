@@ -1,0 +1,8 @@
+syntax = "proto3";
+package test.v1;
+
+import "ProtobufLib.proto";
+
+message SimpleMessage {
+    string content = 1;
+} 

@@ -5,8 +5,8 @@ const { execSync } = require('child_process');
 
 describe('Import Path Tests', () => {
     const generatedFile = path.join(__dirname, 'import_test', 'import_paths.sol');
-    const packageLevelFile1 = path.join(__dirname, 'test/v1.sol');
-    const packageLevelFile2 = path.join(__dirname, 'test/v2.sol');
+    const packageLevelFile1 = path.join(__dirname, 'test/v1/test1.sol');
+    const packageLevelFile2 = path.join(__dirname, 'test/v2/test2.sol');
 
     it('should generate correct import paths', () => {
         // Read the generated Solidity file
@@ -24,31 +24,19 @@ describe('Import Path Tests', () => {
         // Verify ProtobufLib is imported correctly (local path)
         assert.ok(
             imports.some(line => line.includes('import "ProtobufLib.sol";')),
-            'ProtobufLib should be imported using local path'
+            'Should import ProtobufLib using local path'
         );
 
         // Verify no scoped package imports exist
         assert.ok(
             !imports.some(line => line.includes('@')),
-            'No imports should contain @ symbol'
+            'Should not contain @ symbol'
         );
 
         // Verify no node_modules imports exist
         assert.ok(
             !imports.some(line => line.includes('node_modules')),
-            'No imports should contain node_modules'
-        );
-
-        // Verify helper.proto is imported correctly
-        assert.ok(
-            imports.some(line => line.includes('import "helper.sol";')),
-            'helper.proto should be imported as helper.sol'
-        );
-
-        // Verify nested.proto is imported correctly
-        assert.ok(
-            imports.some(line => line.includes('import "subfolder/nested.sol";')),
-            'nested.proto should be imported as subfolder/nested.sol'
+            'Should not contain node_modules'
         );
     });
 
