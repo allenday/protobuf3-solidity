@@ -314,7 +314,7 @@ func (g *Generator) generateFile(protoFile *descriptorpb.FileDescriptorProto) (*
 	b.P0()
 
 	// Add imports at file level
-	b.P("import \"@protobuf3-solidity-lib/contracts/ProtobufLib.sol\";")
+	b.P("import \"@lazyledger/protobuf3-solidity-lib/contracts/ProtobufLib.sol\";")
 
 	// Generate imports for dependencies
 	for _, dependency := range protoFile.GetDependency() {
@@ -527,9 +527,9 @@ func (g *Generator) dependencyToImportPath(dependency string) string {
 		}
 	}
 
-	// For local imports, use the package name to determine the path
-	packageName := strings.ReplaceAll(dependency, "/", "_")
-	return fmt.Sprintf("@protobuf3-solidity-lib/contracts/%s.sol", packageName)
+	// For local imports, use the file name as is
+	fileName := components[len(components)-1]
+	return fmt.Sprintf("./%s.sol", fileName)
 }
 
 // generateFloatDoubleHelpers generates helper functions for float/double fixed-point scaling
