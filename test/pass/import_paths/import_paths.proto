@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package import_paths;
+
+// This message will require importing the protobuf lib
+message Message {
+  // Fields that require imports
+  bytes data = 1;
+  string text = 2;
+  
+  // Repeated fields that require list wrappers
+  repeated bytes data_list = 3;
+  repeated string text_list = 4;
+} 
