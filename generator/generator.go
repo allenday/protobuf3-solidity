@@ -79,6 +79,10 @@ type Generator struct {
 	helperMessages map[string]map[string]*descriptorpb.DescriptorProto // package -> message name -> descriptor
 	// Track map field type mappings: original type name -> wrapper name
 	mapFieldMappings map[string]string
+	// Track nested enum name mappings: original nested name -> flattened name
+	enumMappings map[string]string
+	// Track nested message name mappings: original nested name -> flattened name
+	messageMappings map[string]string
 	
 	// Configuration options
 	strictFieldNumberValidation bool
@@ -98,6 +102,8 @@ func New(request *pluginpb.CodeGeneratorRequest, versionString string) *Generato
 	g.enumMaxes = make(map[string]int)
 	g.helperMessages = make(map[string]map[string]*descriptorpb.DescriptorProto)
 	g.mapFieldMappings = make(map[string]string)
+	g.enumMappings = make(map[string]string)
+	g.messageMappings = make(map[string]string)
 	g.messageRegistry = make(map[string]*descriptorpb.DescriptorProto)
 
 	g.versionString = versionString

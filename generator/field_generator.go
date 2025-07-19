@@ -352,10 +352,10 @@ func (g *Generator) generateMessageDecoder(structName string, fields []*descript
 					b.P()
 				}
 			} else {
-				// Non-packed repeated field (i.e. message or string)
+				// Non-packed repeated field (i.e. message, string, or bytes)
 				
-				// Special handling for repeated string fields
-				if fieldDescriptorType == descriptorpb.FieldDescriptorProto_TYPE_STRING {
+				// Special handling for repeated string and bytes fields
+				if fieldDescriptorType == descriptorpb.FieldDescriptorProto_TYPE_STRING || fieldDescriptorType == descriptorpb.FieldDescriptorProto_TYPE_BYTES {
 					wrapperName := fmt.Sprintf("%sList", strings.Title(fieldName))
 					
 					b.P("uint64 initial_pos = pos;")
@@ -873,33 +873,60 @@ func (g *Generator) generateMessageEncoder(structName string, fields []*descript
 					b.P("}")
 				}
 			} else {
-				// Non-packed repeated field (i.e. message)
+				// Non-packed repeated field (i.e. message, string, or bytes)
 
-				fieldTypeName, err := g.getSolTypeName(field)
-				if err != nil {
-					return err
+				// Special handling for repeated string and bytes fields
+				if fieldDescriptorType == descriptorpb.FieldDescriptorProto_TYPE_STRING || fieldDescriptorType == descriptorpb.FieldDescriptorProto_TYPE_BYTES {
+					wrapperName := fmt.Sprintf("%sList", strings.Title(fieldName))
+					
+					b.P(fmt.Sprintf("for (uint64 i = 0; i < instance.%s.length; i++) {", fieldName))
+					b.Indent()
+					b.P("// Encode key")
+					b.P(fmt.Sprintf("pos = ProtobufLib.encode_key(%d, ProtobufLib.WireType.LengthDelimited, pos, buf);", fieldNumber))
+					b.P()
+
+					b.P("// Encode length")
+					b.P("uint64 len_pos = pos;")
+					b.P("pos += 1;")
+					b.P()
+
+					b.P("// Encode wrapper message")
+					b.P(fmt.Sprintf("pos = %sCodec.encode(pos, buf, instance.%s[i]);", wrapperName, fieldName))
+					b.P()
+
+					b.P("// Encode length")
+					b.P("uint64 len = pos - len_pos - 1;")
+					b.P("buf[len_pos] = bytes1(uint8(len));")
+					b.Unindent()
+					b.P("}")
+				} else {
+					// Regular message field
+					fieldTypeName, err := g.getSolTypeName(field)
+					if err != nil {
+						return err
+					}
+
+					b.P(fmt.Sprintf("for (uint64 i = 0; i < instance.%s.length; i++) {", fieldName))
+					b.Indent()
+					b.P("// Encode key")
+					b.P(fmt.Sprintf("pos = ProtobufLib.encode_key(%d, ProtobufLib.WireType.LengthDelimited, pos, buf);", fieldNumber))
+					b.P()
+
+					b.P("// Encode length")
+					b.P("uint64 len_pos = pos;")
+					b.P("pos += 1;")
+					b.P()
+
+					b.P("// Encode message")
+					b.P(fmt.Sprintf("pos = %sCodec.encode(pos, buf, instance.%s[i]);", fieldTypeName, fieldName))
+					b.P()
+
+					b.P("// Encode length")
+					b.P("uint64 len = pos - len_pos - 1;")
+					b.P("buf[len_pos] = bytes1(uint8(len));")
+					b.Unindent()
+					b.P("}")
 				}
-
-				b.P(fmt.Sprintf("for (uint64 i = 0; i < instance.%s.length; i++) {", fieldName))
-				b.Indent()
-				b.P("// Encode key")
-				b.P(fmt.Sprintf("pos = ProtobufLib.encode_key(%d, ProtobufLib.WireType.LengthDelimited, pos, buf);", fieldNumber))
-				b.P()
-
-				b.P("// Encode length")
-				b.P("uint64 len_pos = pos;")
-				b.P("pos += 1;")
-				b.P()
-
-				b.P("// Encode message")
-				b.P(fmt.Sprintf("pos = %sCodec.encode(pos, buf, instance.%s[i]);", fieldTypeName, fieldName))
-				b.P()
-
-				b.P("// Encode length")
-				b.P("uint64 len = pos - len_pos - 1;")
-				b.P("buf[len_pos] = bytes1(uint8(len));")
-				b.Unindent()
-				b.P("}")
 			}
 		} else {
 			// Optional field (i.e. not repeated)

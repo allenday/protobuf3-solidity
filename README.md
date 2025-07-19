@@ -142,20 +142,21 @@ message StreamMessagesRequest {
 1. Repeated numeric types must explicitly specify `[packed = true]`.
 1. Empty packed arrays are rejected by default (unless `allow_empty_packed_arrays=true`).
 
-**Supported features**:
-1. ✅ **All primitive types** - int32, int64, uint32, uint64, sint32, sint64, fixed32, fixed64, sfixed32, sfixed64, bool, string, bytes, float, double
-2. ✅ **Enums** - Top-level enum definitions with proper validation
-3. ✅ **Messages** - Top-level message definitions with all field types
-4. ✅ **Imports** - Cross-file imports with proper type resolution
-5. ✅ **Package support** - Full package namespace support with automatic library generation
-6. ✅ **Map fields** - Support for protobuf map fields with automatic wrapper message generation
-7. ✅ **Repeated fields** - Support for repeated fields including strings (with automatic wrapper message generation)
-8. ✅ **Oneof fields** - Support for protobuf oneof fields (mutual exclusivity at runtime)
-9. ✅ **gRPC services** - Generation of Solidity interfaces for gRPC service definitions
-10. ✅ **Float/Double types** - Automatic conversion to fixed-point integers with proper IEEE 754 scaling (float→int32 with 1e6 precision, double→int64 with 1e15 precision)
-11. ✅ **Cross-package type resolution** - Proper handling of package-qualified type names
-12. ✅ **Configurable validation** - Relaxed validation options for Google API compatibility
-13. ✅ **Scoped helper messages** - Helper messages are properly scoped to package namespaces
+## Supported Features
+
+This protobuf3-solidity generator supports the following protobuf3 features:
+
+- **Primitive types**: All protobuf3 primitive types (int32, int64, uint32, uint64, sint32, sint64, fixed32, fixed64, sfixed32, sfixed64, float, double, bool, string, bytes)
+- **Enums**: Top-level enums and nested enums (flattened to top-level)
+- **Messages**: Top-level messages and nested messages (flattened to top-level)
+- **Repeated fields**: Arrays of primitive types, enums, and messages
+- **Repeated strings**: Using wrapper messages for proper encoding/decoding
+- **Repeated bytes**: Using wrapper messages for proper encoding/decoding
+- **Maps**: Using wrapper messages for proper encoding/decoding
+- **Oneof fields**: Supported with proper validation
+- **Imports**: Cross-file message and enum references
+- **Packages**: Namespace support for message and enum names
+- **Services**: Message generation for service definitions (no RPC code generation)
 
 **Currently unsupported features**:
 1. ❌ **Nested enum definitions** - Enums must be defined at the top level, not inside messages
