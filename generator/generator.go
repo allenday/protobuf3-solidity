@@ -317,12 +317,12 @@ func (g *Generator) generateFile(protoFile *descriptorpb.FileDescriptorProto) (*
 	// Add package comment
 	packageName := protoFile.GetPackage()
 	if len(packageName) > 0 {
-		b.P("// Package: ", packageName)
+		b.P(fmt.Sprintf("// Package: %s", packageName))
 	}
 
 	// Generate library name from package name
 	libraryName := g.packageToLibraryName(packageName)
-	b.P("library ", libraryName, " {")
+	b.P(fmt.Sprintf("library %s {", libraryName))
 	b.P0()
 
 	// Add imports at the top level

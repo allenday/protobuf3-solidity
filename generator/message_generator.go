@@ -138,7 +138,7 @@ func (g *Generator) generateMessage(descriptor *descriptorpb.DescriptorProto, pa
 	}
 
 	// Generate struct
-	b.P("// ", structName, " represents a protobuf message")
+	b.P(fmt.Sprintf("// %s represents a protobuf message", structName))
 	b.P(fmt.Sprintf("struct %s {", structName))
 	b.Indent()
 
