@@ -53,11 +53,13 @@ func (g *Generator) generateMessageDecoder(structName string, fields []*descript
 	b.P()
 
 	b.P("// Check that the field number of monotonically increasing")
-	b.P("if (field_number <= previous_field_number) {")
-	b.Indent()
-	b.P("return (false, pos, instance);")
-	b.Unindent()
-	b.P("}")
+	if !g.allowNonMonotonicFields {
+		b.P("if (field_number <= previous_field_number) {")
+		b.Indent()
+		b.P("return (false, pos, instance);")
+		b.Unindent()
+		b.P("}")
+	}
 	b.P()
 
 	b.P("// Check that the wire type is correct")
@@ -188,11 +190,13 @@ func (g *Generator) generateMessageDecoder(structName string, fields []*descript
 					b.P()
 
 					b.P("// Empty packed array must be omitted")
-					b.P("if (len == 0) {")
-					b.Indent()
-					b.P("return (false, pos);")
-					b.Unindent()
-					b.P("}")
+					if !g.allowEmptyPackedArrays {
+						b.P("if (len == 0) {")
+						b.Indent()
+						b.P("return (false, pos);")
+						b.Unindent()
+						b.P("}")
+					}
 					b.P()
 
 					b.P("uint64 initial_pos = pos;")
@@ -281,11 +285,13 @@ func (g *Generator) generateMessageDecoder(structName string, fields []*descript
 					b.P()
 
 					b.P("// Empty packed array must be omitted")
-					b.P("if (len == 0) {")
-					b.Indent()
-					b.P("return (false, pos);")
-					b.Unindent()
-					b.P("}")
+					if !g.allowEmptyPackedArrays {
+						b.P("if (len == 0) {")
+						b.Indent()
+						b.P("return (false, pos);")
+						b.Unindent()
+						b.P("}")
+					}
 					b.P()
 
 					b.P("uint64 initial_pos = pos;")
