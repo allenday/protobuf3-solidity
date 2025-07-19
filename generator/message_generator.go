@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"google.golang.org/protobuf/types/descriptorpb"
+	"google.golang.org/protobuf/proto"
 )
 
 // generateEnum generates Solidity enum code from a protobuf enum descriptor
@@ -47,34 +48,82 @@ func (g *Generator) generateEnum(descriptor *descriptorpb.EnumDescriptorProto, b
 	return nil
 }
 
+// generateFlattenedEnum generates a flattened enum from a nested enum descriptor
+func (g *Generator) generateFlattenedEnum(descriptor *descriptorpb.EnumDescriptorProto, flattenedName string, b *WriteableBuffer) error {
+	// Create a copy of the enum descriptor with the flattened name
+	flattenedDescriptor := &descriptorpb.EnumDescriptorProto{
+		Name:  proto.String(flattenedName),
+		Value: descriptor.GetValue(),
+	}
+	
+	// Generate the enum with the flattened name
+	return g.generateEnum(flattenedDescriptor, b)
+}
+
+// generateFlattenedMessage generates a flattened message from a nested message descriptor
+func (g *Generator) generateFlattenedMessage(descriptor *descriptorpb.DescriptorProto, packageName string, flattenedName string, b *WriteableBuffer) error {
+	// Create a copy of the message descriptor with the flattened name
+	flattenedDescriptor := &descriptorpb.DescriptorProto{
+		Name:      proto.String(flattenedName),
+		Field:     descriptor.GetField(),
+		EnumType:  descriptor.GetEnumType(),
+		NestedType: descriptor.GetNestedType(),
+		Options:   descriptor.GetOptions(),
+	}
+	
+	// Generate the message with the flattened name
+	return g.generateMessage(flattenedDescriptor, packageName, b)
+}
+
 // generateMessage generates Solidity message code from a protobuf message descriptor
 func (g *Generator) generateMessage(descriptor *descriptorpb.DescriptorProto, packageName string, b *WriteableBuffer) error {
 	structName := sanitizeKeyword(descriptor.GetName())
 	
-	// PostFiat enhancement: Handle maps and warn about other nested types
+	// PostFiat enhancement: Handle nested enums by flattening them to top-level
 	if len(descriptor.GetEnumType()) > 0 {
-		log.Printf("WARNING: Nested enums are not supported in protobuf3-solidity. " +
-			"Message '%s' contains nested enums that will be ignored. " +
-			"Consider flattening your protobuf structure. See BACKLOG.md for planned future support.", structName)
-		return errors.New("nested enum definitions are forbidden: " + structName)
+		log.Printf("INFO: Flattening %d nested enums in message '%s' to top-level enums", len(descriptor.GetEnumType()), structName)
+		
+		// Generate flattened enums first
+		for _, enumDescriptor := range descriptor.GetEnumType() {
+			// Create unique name for the flattened enum
+			flattenedEnumName := fmt.Sprintf("%s_%s", structName, enumDescriptor.GetName())
+			
+			// Store the mapping for type resolution
+			g.enumMappings[fmt.Sprintf("%s.%s", structName, enumDescriptor.GetName())] = flattenedEnumName
+			
+			// Generate the flattened enum
+			if err := g.generateFlattenedEnum(enumDescriptor, flattenedEnumName, b); err != nil {
+				return err
+			}
+		}
 	}
 	
-	// Handle nested messages (which includes maps)
+	// PostFiat enhancement: Handle nested messages by flattening them to top-level
 	if len(descriptor.GetNestedType()) > 0 {
-		// Check if these are map entries (protobuf maps are represented as nested messages)
-		hasNonMapNested := false
+		// Filter out map entries (protobuf maps are represented as nested messages)
+		var actualNestedMessages []*descriptorpb.DescriptorProto
 		for _, nestedType := range descriptor.GetNestedType() {
 			if !nestedType.GetOptions().GetMapEntry() {
-				hasNonMapNested = true
-				break
+				actualNestedMessages = append(actualNestedMessages, nestedType)
 			}
 		}
 		
-		if hasNonMapNested {
-			log.Printf("WARNING: Nested messages are not supported in protobuf3-solidity. " +
-				"Message '%s' contains nested message that will be ignored. " +
-				"Consider flattening your protobuf structure. See BACKLOG.md for planned future support.", structName)
-			return errors.New("nested message definitions are forbidden: " + structName)
+		if len(actualNestedMessages) > 0 {
+			log.Printf("INFO: Flattening %d nested messages in message '%s' to top-level messages", len(actualNestedMessages), structName)
+			
+			// Generate flattened messages first
+			for _, nestedDescriptor := range actualNestedMessages {
+				// Create unique name for the flattened message
+				flattenedMessageName := fmt.Sprintf("%s_%s", structName, nestedDescriptor.GetName())
+				
+				// Store the mapping for type resolution
+				g.messageMappings[fmt.Sprintf("%s.%s", structName, nestedDescriptor.GetName())] = flattenedMessageName
+				
+				// Generate the flattened message
+				if err := g.generateFlattenedMessage(nestedDescriptor, packageName, flattenedMessageName, b); err != nil {
+					return err
+				}
+			}
 		}
 	}
 
@@ -184,6 +233,26 @@ func (g *Generator) generateMessage(descriptor *descriptorpb.DescriptorProto, pa
 					b.P(fmt.Sprintf("%s%s %s;", wrapperName, arrayStr, fieldName))
 				} else {
 					// Regular string field
+					fieldType, err := typeToSol(fieldDescriptorType)
+					if err != nil {
+						return errors.New(err.Error() + ": " + structName + "." + fieldName)
+					}
+					b.P(fmt.Sprintf("%s %s;", fieldType, fieldName))
+				}
+			case descriptorpb.FieldDescriptorProto_TYPE_BYTES:
+				// PostFiat enhancement: Use wrapper message for repeated bytes
+				if isFieldRepeated(field) {
+					wrapperName := fmt.Sprintf("%sList", strings.Title(fieldName))
+					if g.helperMessages[packageName] == nil {
+						g.helperMessages[packageName] = make(map[string]*descriptorpb.DescriptorProto)
+					}
+					if _, exists := g.helperMessages[packageName][wrapperName]; !exists {
+						g.helperMessages[packageName][wrapperName] = g.createBytesWrapperMessage(fieldName)
+						log.Printf("INFO: Generated wrapper message '%s' for repeated bytes field '%s.%s'", wrapperName, structName, fieldName)
+					}
+					b.P(fmt.Sprintf("%s%s %s;", wrapperName, arrayStr, fieldName))
+				} else {
+					// Regular bytes field
 					fieldType, err := typeToSol(fieldDescriptorType)
 					if err != nil {
 						return errors.New(err.Error() + ": " + structName + "." + fieldName)

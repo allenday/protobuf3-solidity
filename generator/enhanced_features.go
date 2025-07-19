@@ -22,7 +22,19 @@ func (g *Generator) getSolTypeName(field *descriptorpb.FieldDescriptorProto) (st
 	
 	log.Printf("DEBUG: getSolTypeName resolved '%s' to '%s'", field.GetName(), originalTypeName)
 	
-	// Check if this is a map field that has been mapped to a wrapper
+	// Check if this is a nested enum that has been mapped to a flattened name
+	if flattenedName, exists := g.enumMappings[originalTypeName]; exists {
+		log.Printf("DEBUG: Found nested enum mapping: '%s' -> '%s'", originalTypeName, flattenedName)
+		return flattenedName, nil
+	}
+	
+	// Check if this is a nested message that has been mapped to a flattened name
+	if flattenedName, exists := g.messageMappings[originalTypeName]; exists {
+		log.Printf("DEBUG: Found nested message mapping: '%s' -> '%s'", originalTypeName, flattenedName)
+		return flattenedName, nil
+	}
+	
+	// Check if this is a map field that has been mapped to a wrapper name
 	if wrapperName, exists := g.mapFieldMappings[originalTypeName]; exists {
 		log.Printf("DEBUG: Found map field mapping: '%s' -> '%s'", originalTypeName, wrapperName)
 		return wrapperName, nil
@@ -46,6 +58,24 @@ func (g *Generator) createStringWrapperMessage(fieldName string) *descriptorpb.D
 	return &descriptorpb.DescriptorProto{
 		Name:  proto.String(wrapperName),
 		Field: []*descriptorpb.FieldDescriptorProto{stringField},
+	}
+}
+
+// createBytesWrapperMessage creates a wrapper message for repeated bytes fields
+func (g *Generator) createBytesWrapperMessage(fieldName string) *descriptorpb.DescriptorProto {
+	wrapperName := fmt.Sprintf("%sList", strings.Title(fieldName))
+	
+	// Create a field for the bytes value
+	bytesField := &descriptorpb.FieldDescriptorProto{
+		Name:   proto.String("value"),
+		Number: proto.Int32(1),
+		Type:   descriptorpb.FieldDescriptorProto_TYPE_BYTES.Enum(),
+		Label:  descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL.Enum(),
+	}
+	
+	return &descriptorpb.DescriptorProto{
+		Name:  proto.String(wrapperName),
+		Field: []*descriptorpb.FieldDescriptorProto{bytesField},
 	}
 }
 
