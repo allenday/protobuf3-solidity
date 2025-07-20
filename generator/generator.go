@@ -86,6 +86,9 @@ type Generator struct {
 	// Global message registry for type resolution
 	messageRegistry map[string]*descriptorpb.DescriptorProto
 
+	// Track successfully generated structs to ensure codec generation matches
+	successfullyGeneratedStructs map[string]bool
+
 	// Configuration options
 	strictFieldNumberValidation bool
 	strictEnumValidation        bool
@@ -105,6 +108,7 @@ func New(request *pluginpb.CodeGeneratorRequest, versionString string) *Generato
 	g.enumMappings = make(map[string]string)
 	g.messageMappings = make(map[string]string)
 	g.messageRegistry = make(map[string]*descriptorpb.DescriptorProto)
+	g.successfullyGeneratedStructs = make(map[string]bool)
 
 	g.versionString = versionString
 	g.licenseString = "CC0"

@@ -7,6 +7,12 @@ message A2AMessage {
   uint32 field2 = 2;
 }
 
+message AgentCard {
+  string agent_id = 1;
+  string agent_name = 2;
+  bool is_active = 3;
+}
+
 enum A2AEnum {
   A2A_UNSPECIFIED = 0;
   A2A_ACTIVE = 1;

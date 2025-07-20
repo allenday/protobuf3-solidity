@@ -21,6 +21,9 @@ bin/
 test/pass/**/*.sol
 test/fail/**/*.sol
 
+# Generated Solidity files in root directories
+*.sol
+
 venv/
 .venv/
 proto/

@@ -50,12 +50,19 @@ func (lg *LibraryGenerator) GenerateEnums(protoFile *descriptorpb.FileDescriptor
 func (lg *LibraryGenerator) GenerateMessageStructs(protoFile *descriptorpb.FileDescriptorProto, g *Generator, b *WriteableBuffer) error {
 	packageName := protoFile.GetPackage()
 
+	// Track successfully generated structs to ensure codec generation matches
+	if g.successfullyGeneratedStructs == nil {
+		g.successfullyGeneratedStructs = make(map[string]bool)
+	}
+
 	// Generate messages (structs only, codec libraries will be generated separately)
 	for _, message := range protoFile.GetMessageType() {
 		err := g.generateMessageStruct(message, packageName, b)
 		if err != nil {
 			return err
 		}
+		// Mark this message as successfully processed
+		g.successfullyGeneratedStructs[message.GetName()] = true
 	}
 
 	// Generate helper messages (structs only, codec libraries will be generated separately)
@@ -67,6 +74,8 @@ func (lg *LibraryGenerator) GenerateMessageStructs(protoFile *descriptorpb.FileD
 			if err != nil {
 				return err
 			}
+			// Mark this helper message as successfully processed
+			g.successfullyGeneratedStructs[helperMessage.GetName()] = true
 		}
 	}
 
@@ -78,19 +87,25 @@ func (lg *LibraryGenerator) GenerateCodecLibraries(protoFile *descriptorpb.FileD
 	packageName := protoFile.GetPackage()
 
 	// Generate codec libraries OUTSIDE the main library block
+	// Only generate codecs for messages that have successfully generated structs
 	for _, message := range protoFile.GetMessageType() {
-		err := g.generateMessageCodec(message, packageName, b)
-		if err != nil {
-			return err
+		if g.successfullyGeneratedStructs[message.GetName()] {
+			err := g.generateMessageCodec(message, packageName, b)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
 	// Generate helper message codec libraries OUTSIDE the main library block
+	// Only generate codecs for helper messages that have successfully generated structs
 	if g.helperMessages[packageName] != nil {
 		for _, helperMessage := range g.helperMessages[packageName] {
-			err := g.generateMessageCodec(helperMessage, packageName, b)
-			if err != nil {
-				return err
+			if g.successfullyGeneratedStructs[helperMessage.GetName()] {
+				err := g.generateMessageCodec(helperMessage, packageName, b)
+				if err != nil {
+					return err
+				}
 			}
 		}
 	}

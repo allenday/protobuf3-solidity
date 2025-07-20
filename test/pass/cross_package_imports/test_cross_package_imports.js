@@ -97,5 +97,56 @@ function testRelativePaths() {
   }
 }
 
+// Regression test: Ensure no codec library is generated for imported types
+function testNoCodecForImportedTypes() {
+  const fs = require('fs');
+  const path = require('path');
+  const solFile = path.join(__dirname, 'postfiat/v3/messages.sol');
+  const solContent = fs.readFileSync(solFile, 'utf8');
+
+  // Should NOT contain: library A2AMessageCodec {
+  if (/library\s+A2AMessageCodec\s*{/.test(solContent)) {
+    console.error('❌ Regression: Found codec library for imported type A2AMessage in postfiat/v3/messages.sol');
+    process.exit(1);
+  } else {
+    console.log('✅ Regression: No codec library for imported type A2AMessage in postfiat/v3/messages.sol');
+  }
+}
+
+// Regression test: Ensure all local message types have both struct definitions and codec libraries
+function testStructAndCodecConsistency() {
+  const fs = require('fs');
+  const path = require('path');
+  const solFile = path.join(__dirname, 'postfiat/v3/messages.sol');
+  const solContent = fs.readFileSync(solFile, 'utf8');
+
+  // Check for local message types that should have both structs and codecs
+  const localMessageTypes = [
+    'GetAgentCardRequest', 
+    'GetAgentCardResponse'
+  ];
+  
+  for (const messageType of localMessageTypes) {
+    const hasStruct = new RegExp(`struct\\s+${messageType}\\s*{`).test(solContent);
+    const hasCodec = new RegExp(`library\\s+${messageType}Codec\\s*{`).test(solContent);
+    
+    if (!hasStruct && hasCodec) {
+      console.error(`❌ Regression: Missing struct definition for ${messageType} but codec library exists`);
+      process.exit(1);
+    } else if (hasStruct && !hasCodec) {
+      console.error(`❌ Regression: Missing codec library for ${messageType} but struct definition exists`);
+      process.exit(1);
+    } else if (!hasStruct && !hasCodec) {
+      console.error(`❌ Regression: Missing both struct definition and codec library for ${messageType}`);
+      process.exit(1);
+    } else {
+      console.log(`✅ Regression: ${messageType} has both struct definition and codec library`);
+    }
+  }
+}
+
+testNoCodecForImportedTypes();
+testStructAndCodecConsistency();
+
 // Run the test
 testRelativePaths(); 
