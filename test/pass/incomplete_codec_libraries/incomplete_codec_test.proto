@@ -1,0 +1,8 @@
+syntax = "proto3";
+
+package incomplete_codec_test;
+
+message TestMessage {
+  string field1 = 1;
+  uint32 field2 = 2;
+} 

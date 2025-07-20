@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package google_protobuf_test;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+
+message TestMessage {
+  google.protobuf.Struct metadata = 1;
+  google.protobuf.Timestamp created_at = 2;
+  google.protobuf.Empty empty_field = 3;
+} 

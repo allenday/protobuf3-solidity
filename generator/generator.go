@@ -325,6 +325,7 @@ func (g *Generator) generateFile(protoFile *descriptorpb.FileDescriptorProto) (*
 	importManager := NewImportManager(g.protobufLibImportPath)
 	libraryGen := NewLibraryGenerator(g.generateFlag)
 	fileNaming := NewFileNaming()
+	googleProtobufGen := NewGoogleProtobufGenerator()
 
 	// Generate file header
 	fileHeaderGen.GenerateFileHeader(b)
@@ -334,6 +335,12 @@ func (g *Generator) generateFile(protoFile *descriptorpb.FileDescriptorProto) (*
 
 	// Generate imports using the generated file name
 	importManager.GenerateImports(protoFile, generatedFileName, b)
+
+	// Generate Google protobuf types if needed
+	err = googleProtobufGen.GenerateGoogleProtobufTypes(protoFile, b)
+	if err != nil {
+		return nil, err
+	}
 
 	// Generate package comment
 	packageName := protoFile.GetPackage()
