@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package a2a.v1;
+
+message A2AMessage {
+  string field1 = 1;
+  uint32 field2 = 2;
+}
+
+enum A2AEnum {
+  A2A_UNSPECIFIED = 0;
+  A2A_ACTIVE = 1;
+  A2A_INACTIVE = 2;
+} 

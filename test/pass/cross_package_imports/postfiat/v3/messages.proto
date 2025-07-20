@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package postfiat.v3;
+
+import "a2a/v1/a2a.proto";
+
+message PostFiatMessage {
+  string postfiat_field = 1;
+  a2a.v1.A2AMessage a2a_message = 2;
+  a2a.v1.A2AEnum a2a_enum = 3;
+} 

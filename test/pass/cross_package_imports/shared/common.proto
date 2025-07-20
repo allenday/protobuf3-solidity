@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package shared.common;
+
+message CommonMessage {
+  string common_field = 1;
+  uint64 timestamp = 2;
+}
+
+enum CommonEnum {
+  COMMON_UNSPECIFIED = 0;
+  COMMON_SUCCESS = 1;
+  COMMON_ERROR = 2;
+} 
