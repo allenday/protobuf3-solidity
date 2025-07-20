@@ -29,7 +29,20 @@ func (b *WriteableBuffer) P(format ...interface{}) {
 				fmt.Fprintf(&b.buffer, "%v", format[0])
 			}
 		} else {
-			fmt.Fprintf(&b.buffer, format[0].(string), format[1:]...)
+			// Extract format string and arguments properly
+			formatStr, ok := format[0].(string)
+			if !ok {
+				// Fallback: just print all arguments as is
+				for i, arg := range format {
+					if i > 0 {
+						b.buffer.WriteByte(' ')
+					}
+					fmt.Fprintf(&b.buffer, "%v", arg)
+				}
+			} else {
+				// Use fmt.Fprintf directly with the format string and arguments
+				fmt.Fprintf(&b.buffer, formatStr, format[1:]...)
+			}
 		}
 	}
 	b.buffer.WriteByte('\n')

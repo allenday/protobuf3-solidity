@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package import_test;
+
+// Test all import path scenarios
+import "ProtobufLib.proto";                                                      // Local library import
+import "helper.proto";                                                          // Local file import
+import "subfolder/nested.proto";                                               // Nested directory import
+
+// Message that uses imports to ensure they're not stripped
+message ImportPathTest {
+    // Local library import
+    protobuf_lib.ProtobufLibMessage lib = 1;
+    // Local imports
+    Helper helper = 2;
+    Nested nested = 3;
+} 

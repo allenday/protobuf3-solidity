@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package empty_message_test;
+
+// Empty message with no fields
+message EmptyRequest {
+}
+
+// Empty message with comment
+message EmptyResponse {
+  // Empty response message
+}
+
+// Message with fields to test alongside empty messages
+message MessageWithFields {
+  string field1 = 1;
+  int32 field2 = 2;
+}
+
+// Service using empty messages
+service TestService {
+  rpc EmptyCall(EmptyRequest) returns (EmptyResponse);
+  rpc NormalCall(MessageWithFields) returns (MessageWithFields);
+} 

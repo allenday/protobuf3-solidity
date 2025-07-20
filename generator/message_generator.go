@@ -83,11 +83,6 @@ func (g *Generator) generateFlattenedMessage(descriptor *descriptorpb.Descriptor
 
 // generateMessage generates Solidity code for a protobuf message.
 func (g *Generator) generateMessage(descriptor *descriptorpb.DescriptorProto, packageName string, b *WriteableBuffer) error {
-	// Reject empty messages
-	if len(descriptor.GetField()) == 0 {
-		return fmt.Errorf("message '%s' must contain at least one field", descriptor.GetName())
-	}
-
 	structName := sanitizeKeyword(descriptor.GetName())
 	fields := descriptor.GetField()
 
@@ -143,7 +138,7 @@ func (g *Generator) generateMessage(descriptor *descriptorpb.DescriptorProto, pa
 	}
 
 	// Generate struct
-	b.P("// ", structName, " represents a protobuf message")
+	b.P(fmt.Sprintf("// %s represents a protobuf message", structName))
 	b.P(fmt.Sprintf("struct %s {", structName))
 	b.Indent()
 
@@ -253,14 +248,14 @@ func (g *Generator) generateMessage(descriptor *descriptorpb.DescriptorProto, pa
 					g.messageMappings[originalTypeName] = wrapperName
 
 					// Use the wrapper message type for the map field
-					b.P(fmt.Sprintf("%s%s %s;", arrayStr, wrapperName, fieldName))
+					b.P(fmt.Sprintf("%s%s %s;", wrapperName, arrayStr, fieldName))
 				} else {
 					// Handle regular enum or message field
 					typeName, err := g.getSolTypeName(field)
 					if err != nil {
 						return err
 					}
-					b.P(fmt.Sprintf("%s%s %s;", arrayStr, typeName, fieldName))
+					b.P(fmt.Sprintf("%s%s %s;", typeName, arrayStr, fieldName))
 				}
 			case descriptorpb.FieldDescriptorProto_TYPE_STRING:
 				// PostFiat enhancement: Use wrapper message for repeated strings
@@ -273,14 +268,14 @@ func (g *Generator) generateMessage(descriptor *descriptorpb.DescriptorProto, pa
 						g.helperMessages[packageName][wrapperName] = g.createStringWrapperMessage(fieldName)
 						log.Printf("INFO: Generated wrapper message '%s' for repeated string field '%s.%s'", wrapperName, structName, fieldName)
 					}
-					b.P(fmt.Sprintf("%s%s %s;", arrayStr, wrapperName, fieldName))
+					b.P(fmt.Sprintf("%s%s %s;", wrapperName, arrayStr, fieldName))
 				} else {
 					// Regular string field
 					fieldType, err := typeToSol(fieldDescriptorType)
 					if err != nil {
 						return errors.New(err.Error() + ": " + structName + "." + fieldName)
 					}
-					b.P(fmt.Sprintf("%s %s;", fieldType, fieldName))
+					b.P(fmt.Sprintf("%s%s %s;", fieldType, arrayStr, fieldName))
 				}
 			case descriptorpb.FieldDescriptorProto_TYPE_BYTES:
 				// PostFiat enhancement: Use wrapper message for repeated bytes
@@ -293,14 +288,14 @@ func (g *Generator) generateMessage(descriptor *descriptorpb.DescriptorProto, pa
 						g.helperMessages[packageName][wrapperName] = g.createBytesWrapperMessage(fieldName)
 						log.Printf("INFO: Generated wrapper message '%s' for repeated bytes field '%s.%s'", wrapperName, structName, fieldName)
 					}
-					b.P(fmt.Sprintf("%s%s %s;", arrayStr, wrapperName, fieldName))
+					b.P(fmt.Sprintf("%s%s %s;", wrapperName, arrayStr, fieldName))
 				} else {
 					// Regular bytes field
 					fieldType, err := typeToSol(fieldDescriptorType)
 					if err != nil {
 						return errors.New(err.Error() + ": " + structName + "." + fieldName)
 					}
-					b.P(fmt.Sprintf("%s %s;", fieldType, fieldName))
+					b.P(fmt.Sprintf("%s%s %s;", fieldType, arrayStr, fieldName))
 				}
 			default:
 				// Convert protobuf field type to Solidity native type

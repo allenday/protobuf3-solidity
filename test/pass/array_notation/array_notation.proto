@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package array_notation;
+
+enum TestEnum {
+  UNKNOWN = 0;
+  ONE = 1;
+  TWO = 2;
+}
+
+message NestedMessage {
+  string value = 1;
+}
+
+message Message {
+  // Test repeated primitive types
+  repeated string strings = 1;
+  repeated bytes data = 2;
+  repeated uint64 numbers = 3 [packed = true];
+  
+  // Test repeated enum
+  repeated TestEnum enums = 4;
+  
+  // Test repeated message
+  repeated NestedMessage messages = 5;
+} 

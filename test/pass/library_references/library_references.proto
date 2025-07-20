@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package library_references;
+
+// Enum to test library references
+enum TestEnum {
+  UNKNOWN = 0;
+  ONE = 1;
+  TWO = 2;
+}
+
+// Message to test library references
+message NestedMessage {
+  string value = 1;
+  TestEnum enum_value = 2;
+}
+
+// Main message to test library references
+message Message {
+  // Fields that require library references
+  NestedMessage nested = 1;
+  repeated NestedMessage nested_list = 2;
+  TestEnum enum_value = 3;
+  repeated TestEnum enum_list = 4;
+  
+  // Nested message to test flattening
+  message InnerMessage {
+    string value = 1;
+    TestEnum enum_value = 2;
+  }
+  
+  // Field using the nested message
+  InnerMessage inner = 5;
+  repeated InnerMessage inner_list = 6;
+} 

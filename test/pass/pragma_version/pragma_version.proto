@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package pragma_version;
+
+// Simple message to test pragma version in generated code
+message Message {
+  string text = 1;
+  bytes data = 2;
+  
+  // Nested message to test library generation
+  message NestedMessage {
+    string value = 1;
+  }
+  
+  // Field using the nested message
+  repeated NestedMessage nested = 3;
+} 

@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package empty_messages;
+
+// Empty message for requests that don't need parameters
+message GetAgentCardRequest {
+}
+
+// Empty message for responses that don't need data
+message EmptyResponse {
+}
+
+// Message with fields to test alongside empty messages
+message Message {
+  string text = 1;
+  GetAgentCardRequest request = 2;
+  EmptyResponse response = 3;
+} 
