@@ -15,7 +15,7 @@ func NewGoogleProtobufGenerator() *GoogleProtobufGenerator {
 }
 
 // GenerateGoogleProtobufTypes generates Solidity definitions for Google protobuf types
-func (gpg *GoogleProtobufGenerator) GenerateGoogleProtobufTypes(protoFile *descriptorpb.FileDescriptorProto, b *WriteableBuffer) error {
+func (gpg *GoogleProtobufGenerator) GenerateGoogleProtobufTypes(protoFile *descriptorpb.FileDescriptorProto, b *WriteableBuffer, alreadyGenerated bool) error {
 	// Check if this file uses Google protobuf types
 	usesGoogleTypes := false
 	for _, dependency := range protoFile.GetDependency() {
@@ -26,6 +26,11 @@ func (gpg *GoogleProtobufGenerator) GenerateGoogleProtobufTypes(protoFile *descr
 	}
 
 	if !usesGoogleTypes {
+		return nil
+	}
+
+	// Skip generation if already generated to avoid duplicates
+	if alreadyGenerated {
 		return nil
 	}
 
@@ -75,9 +80,10 @@ func (gpg *GoogleProtobufGenerator) generateTimestampDefinition(b *WriteableBuff
 // generateEmptyDefinition generates the Empty type definition
 func (gpg *GoogleProtobufGenerator) generateEmptyDefinition(b *WriteableBuffer) {
 	b.P("// google.protobuf.Empty - represents an empty message")
+	b.P("// Note: Empty structs are not allowed in Solidity, using placeholder")
 	b.P("struct Empty {")
 	b.Indent()
-	b.P("// Empty struct - no fields")
+	b.P("bool _placeholder; // Placeholder field to avoid empty struct compilation error")
 	b.Unindent()
 	b.P("}")
 	b.P0()

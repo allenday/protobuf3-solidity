@@ -1,0 +1,9 @@
+syntax = "proto3";
+
+package empty_struct_test;
+
+import "google/protobuf/empty.proto";
+
+message TestMessage {
+  google.protobuf.Empty empty_field = 1;
+} 

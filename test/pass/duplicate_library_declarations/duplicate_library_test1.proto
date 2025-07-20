@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package duplicate_library_test1;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+
+message TestMessage1 {
+  google.protobuf.Timestamp created_at = 1;
+  google.protobuf.Empty empty_field = 2;
+} 

@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package duplicate_library_test2;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
+
+message TestMessage2 {
+  google.protobuf.Timestamp updated_at = 1;
+  google.protobuf.Struct metadata = 2;
+} 

@@ -95,6 +95,9 @@ type Generator struct {
 	allowEmptyPackedArrays      bool
 	allowNonMonotonicFields     bool
 	protobufLibImportPath       string // Import path for ProtobufLib.sol
+
+	// Track Google protobuf generation to avoid duplicates
+	googleProtobufGenerated bool
 }
 
 // New initializes a new Generator.
@@ -337,7 +340,11 @@ func (g *Generator) generateFile(protoFile *descriptorpb.FileDescriptorProto) (*
 	importManager.GenerateImports(protoFile, generatedFileName, b)
 
 	// Generate Google protobuf types if needed
-	err = googleProtobufGen.GenerateGoogleProtobufTypes(protoFile, b)
+	err = googleProtobufGen.GenerateGoogleProtobufTypes(protoFile, b, g.googleProtobufGenerated)
+	if err == nil {
+		// Mark as generated if successful
+		g.googleProtobufGenerated = true
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -426,9 +433,9 @@ func (g *Generator) resolveTypeName(typeName string) (string, error) {
 	log.Printf("DEBUG: resolveTypeName called with typeName: '%s'", typeName)
 
 	if len(typeName) == 0 {
-		log.Printf("WARNING: Empty type name passed to resolveTypeName, using default type")
-		// Workaround for corrupted descriptors: use a default type name
-		return "UnknownType", nil
+		log.Printf("INFO: Empty type name detected, using placeholder type for corrupted descriptor")
+		// Workaround for corrupted descriptors: use a placeholder type name
+		return "PlaceholderType", nil
 	}
 
 	// Remove leading dot
