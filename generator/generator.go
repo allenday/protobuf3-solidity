@@ -117,7 +117,7 @@ func New(request *pluginpb.CodeGeneratorRequest, versionString string) *Generato
 	g.strictEnumValidation = true
 	g.allowEmptyPackedArrays = false
 	g.allowNonMonotonicFields = false
-	g.protobufLibImportPath = "ProtobufLib.sol" // Always use local import
+	g.protobufLibImportPath = "@protobuf3-solidity-lib/contracts/ProtobufLib.sol" // Use package path by default
 
 	return g
 }

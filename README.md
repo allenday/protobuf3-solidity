@@ -26,6 +26,15 @@ protoc --plugin protoc-gen-sol --sol_out . foo.proto
 
 # Generate Solidity file with Apache-2.0 license identifier
 protoc --plugin protoc-gen-sol --sol_out license=Apache-2.0:. foo.proto
+
+# Use local ProtobufLib import (for local development)
+protoc --plugin protoc-gen-sol --sol_out protobuf_lib_import=ProtobufLib.sol:. foo.proto
+
+# Use package ProtobufLib import (for npm packages - default)
+protoc --plugin protoc-gen-sol --sol_out protobuf_lib_import=@protobuf3-solidity-lib/contracts/ProtobufLib.sol:. foo.proto
+
+# Use custom relative path for ProtobufLib
+protoc --plugin protoc-gen-sol --sol_out protobuf_lib_import=./lib/ProtobufLib.sol:. foo.proto
 ```
 
 ### Parameters
@@ -39,6 +48,11 @@ protoc --plugin protoc-gen-sol --sol_out license=Apache-2.0:. foo.proto
   - `all`: both decoder and encoder will be generated
   - `decoder`: only decoder will be generated
   - `encoder`: only encoder will be generated (experimental!)
+- `protobuf_lib_import`: default `@protobuf3-solidity-lib/contracts/ProtobufLib.sol`
+  - specifies the import path for the ProtobufLib dependency
+  - use package paths like `@protobuf3-solidity-lib/contracts/ProtobufLib.sol` for npm packages
+  - use local paths like `ProtobufLib.sol` for local development
+  - use relative paths like `./lib/ProtobufLib.sol` for custom layouts
 - `strict_field_numbers`: default `true`
   - `true`: enforce strict field number validation (must increment by 1)
   - `false`: allow non-monotonic field ordering
