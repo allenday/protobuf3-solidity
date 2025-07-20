@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package postfiat.v3;
+
+import "a2a/v1/a2a.proto";
+
+// Service definition
+service PostFiatAgentRegistryService {
+  rpc GetAgentCard(GetAgentCardRequest) returns (GetAgentCardResponse);
+}
+
+// Message definition
+message GetAgentCardRequest {
+  string agent_id = 1;
+}
+
+message GetAgentCardResponse {
+  a2a.v1.AgentCard agent_card = 1;
+} 

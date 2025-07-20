@@ -340,3 +340,175 @@ func (g *Generator) generateMessage(descriptor *descriptorpb.DescriptorProto, pa
 
 	return nil
 }
+
+// generateMessageStruct generates only the struct definition for a protobuf message (no codec library)
+func (g *Generator) generateMessageStruct(descriptor *descriptorpb.DescriptorProto, packageName string, b *WriteableBuffer) error {
+	structName := sanitizeKeyword(descriptor.GetName())
+	fields := descriptor.GetField()
+
+	// Use the field processor to handle field name processing
+	fieldProcessor := NewFieldProcessor()
+	fieldNameMap, err := fieldProcessor.ProcessFieldNames(fields)
+	if err != nil {
+		return err
+	}
+
+	// PostFiat enhancement: Handle nested enums by flattening them to top-level
+	if len(descriptor.GetEnumType()) > 0 {
+		log.Printf("INFO: Flattening %d nested enums in message '%s' to top-level enums", len(descriptor.GetEnumType()), structName)
+
+		// Generate flattened enums first
+		for _, enumDescriptor := range descriptor.GetEnumType() {
+			// Create unique name for the flattened enum
+			flattenedEnumName := fmt.Sprintf("%s_%s", structName, enumDescriptor.GetName())
+
+			// Store the mapping for type resolution
+			g.enumMappings[fmt.Sprintf("%s.%s", structName, enumDescriptor.GetName())] = flattenedEnumName
+
+			// Generate the flattened enum
+			if err := g.generateFlattenedEnum(enumDescriptor, flattenedEnumName, b); err != nil {
+				return err
+			}
+		}
+	}
+
+	// PostFiat enhancement: Handle nested messages by flattening them to top-level
+	if len(descriptor.GetNestedType()) > 0 {
+		// Filter out map entries (protobuf maps are represented as nested messages)
+		var actualNestedMessages []*descriptorpb.DescriptorProto
+		for _, nestedType := range descriptor.GetNestedType() {
+			if !nestedType.GetOptions().GetMapEntry() {
+				actualNestedMessages = append(actualNestedMessages, nestedType)
+			}
+		}
+
+		if len(actualNestedMessages) > 0 {
+			log.Printf("INFO: Flattening %d nested messages in message '%s' to top-level messages", len(actualNestedMessages), structName)
+
+			// Generate flattened messages first
+			for _, nestedDescriptor := range actualNestedMessages {
+				// Create unique name for the flattened message
+				flattenedMessageName := fmt.Sprintf("%s_%s", structName, nestedDescriptor.GetName())
+
+				// Store the mapping for type resolution
+				g.messageMappings[fmt.Sprintf("%s.%s", structName, nestedDescriptor.GetName())] = flattenedMessageName
+
+				// Generate the flattened message
+				if err := g.generateFlattenedMessage(nestedDescriptor, packageName, flattenedMessageName, b); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
+	// Generate struct
+	b.P(fmt.Sprintf("// %s represents a protobuf message", structName))
+	b.P(fmt.Sprintf("struct %s {", structName))
+	b.Indent()
+
+	// Generate fields (only if we have fields)
+	if len(fields) > 0 {
+		// Generate field definitions
+		for _, field := range fields {
+			fieldName := fieldNameMap[field.GetNumber()]
+			fieldDescriptorType := field.GetType()
+
+			// Get array suffix for repeated fields
+			arrayStr := fieldProcessor.GetArrayString(field)
+
+			switch fieldDescriptorType {
+			case descriptorpb.FieldDescriptorProto_TYPE_ENUM,
+				descriptorpb.FieldDescriptorProto_TYPE_MESSAGE:
+				// PostFiat enhancement: Check if this is a map field
+				if g.isMapField(field, descriptor) {
+					// Handle map field with wrapper message
+					keyType, valueType, err := g.getMapKeyValueTypes(field, descriptor)
+					if err != nil {
+						return err
+					}
+
+					wrapperName := fmt.Sprintf("%sEntry", strings.Title(fieldName))
+					if g.helperMessages[packageName] == nil {
+						g.helperMessages[packageName] = make(map[string]*descriptorpb.DescriptorProto)
+					}
+					if _, exists := g.helperMessages[packageName][wrapperName]; !exists {
+						g.helperMessages[packageName][wrapperName] = g.createMapWrapperMessage(fieldName, keyType, valueType)
+						log.Printf("INFO: Generated wrapper message '%s' for map field '%s.%s'", wrapperName, structName, fieldName)
+					}
+
+					// Store the mapping from original type name to wrapper name
+					originalTypeName := field.GetTypeName()
+					if len(originalTypeName) > 0 && originalTypeName[0] == '.' {
+						originalTypeName = originalTypeName[1:]
+					}
+					g.messageMappings[originalTypeName] = wrapperName
+
+					// Use the wrapper message type for the map field
+					b.P(fmt.Sprintf("%s%s %s;", wrapperName, arrayStr, fieldName))
+				} else {
+					// Handle regular enum or message field
+					typeName, err := g.getSolTypeName(field)
+					if err != nil {
+						return err
+					}
+					b.P(fmt.Sprintf("%s%s %s;", typeName, arrayStr, fieldName))
+				}
+
+			default:
+				// Convert protobuf field type to Solidity native type
+				fieldType, err := typeToSol(fieldDescriptorType)
+				if err != nil {
+					return errors.New(err.Error() + ": " + structName + "." + fieldName)
+				}
+
+				b.P(fmt.Sprintf("%s%s %s;", fieldType, arrayStr, fieldName))
+			}
+		}
+	}
+
+	b.Unindent()
+	b.P("}")
+	b.P0()
+
+	return nil
+}
+
+// generateMessageCodec generates only the codec library for a protobuf message (outside main library)
+func (g *Generator) generateMessageCodec(descriptor *descriptorpb.DescriptorProto, packageName string, b *WriteableBuffer) error {
+	structName := sanitizeKeyword(descriptor.GetName())
+	fields := descriptor.GetField()
+
+	// Use the field processor to handle field name processing
+	fieldProcessor := NewFieldProcessor()
+	fieldNameMap, err := fieldProcessor.ProcessFieldNames(fields)
+	if err != nil {
+		return err
+	}
+
+	// Generate codec library at the top level (outside main library)
+	b.P(fmt.Sprintf("library %sCodec {", structName))
+	b.Indent()
+
+	// Only generate codec functions if we have fields
+	if len(fields) > 0 {
+		if g.generateFlag == generateFlagAll || g.generateFlag == generateFlagDecoder {
+			err := g.generateMessageDecoder(structName, fields, fieldNameMap, b)
+			if err != nil {
+				return err
+			}
+		}
+
+		if g.generateFlag == generateFlagAll || g.generateFlag == generateFlagEncoder {
+			err := g.generateMessageEncoder(structName, fields, fieldNameMap, b)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	b.Unindent()
+	b.P("}")
+	b.P0()
+
+	return nil
+}

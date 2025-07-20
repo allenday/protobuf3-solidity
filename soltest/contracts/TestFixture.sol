@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-pragma solidity >=0.6.0 <8.0.0;
-pragma experimental ABIEncoderV2;
+pragma solidity ^0.8.19;
 
-import "@lazyledger/protobuf3-solidity-lib/contracts/ProtobufLib.sol";
+import "ProtobufLib.sol";
 import "./all_features.proto.sol";
 import "./top.proto.sol";
 

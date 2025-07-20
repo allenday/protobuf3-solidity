@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package deep.nested.package;
+
+import "a2a/v1/a2a.proto";
+import "shared/common.proto";
+
+message DeepNestedMessage {
+  string deep_field = 1;
+  a2a.v1.A2AMessage a2a_message = 2;
+  shared.common.CommonMessage common_message = 3;
+  shared.common.CommonEnum common_enum = 4;
+} 
