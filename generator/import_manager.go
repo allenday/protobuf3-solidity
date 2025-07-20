@@ -46,7 +46,7 @@ func (im *ImportManager) GenerateImports(protoFile *descriptorpb.FileDescriptorP
 }
 
 // dependencyToImportPath converts a protobuf dependency to a Solidity import path
-// Always returns local paths to avoid compilation issues with Hardhat and other tools
+// Uses configured import path for ProtobufLib, local paths for other dependencies
 func (im *ImportManager) dependencyToImportPath(dependency string) string {
 	// Remove .proto extension if present
 	dependency = strings.TrimSuffix(dependency, ".proto")
@@ -54,12 +54,11 @@ func (im *ImportManager) dependencyToImportPath(dependency string) string {
 	// Convert path separators to forward slashes
 	dependency = strings.ReplaceAll(dependency, "\\", "/")
 
-	// Handle ProtobufLib import - always use local path
+	// Handle ProtobufLib import - use configured path
 	if dependency == "ProtobufLib" {
-		return "ProtobufLib.sol"
+		return im.protobufLibImportPath
 	}
 
 	// For all other imports, use local paths
-	// Never use scoped package syntax (@lazyledger, etc.) to avoid compilation issues
 	return dependency + ".sol"
 }

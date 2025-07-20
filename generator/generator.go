@@ -187,15 +187,12 @@ func (g *Generator) ParseParameters() error {
 				return errors.New("allow_non_monotonic_fields must be 'true' or 'false'")
 			}
 		case "protobuf_lib_import":
-			// Always use local import path to avoid compilation issues
-			// Extract just the filename from the path, regardless of what was provided
-			parts := strings.Split(value, "/")
-			baseName := parts[len(parts)-1]
-			if !strings.HasSuffix(baseName, ".sol") {
-				baseName += ".sol"
+			// Use the provided import path as-is
+			// This allows for both local paths (ProtobufLib.sol) and package paths (@protobuf3-solidity-lib/contracts/ProtobufLib.sol)
+			if !strings.HasSuffix(value, ".sol") {
+				value += ".sol"
 			}
-			// Force local import path - never use scoped package syntax
-			g.protobufLibImportPath = baseName
+			g.protobufLibImportPath = value
 		default:
 			return errors.New("unrecognized option " + key)
 		}
@@ -529,7 +526,7 @@ func (g *Generator) generateFloatDoubleHelpers(b *WriteableBuffer) error {
 	b.P("// Apply sign")
 	b.P("if sign {")
 	b.Indent()
-	b.P("scaled_mantissa := mul(scaled_mantissa, -1)")
+	b.P("scaled_mantissa := sub(0, scaled_mantissa)")
 	b.Unindent()
 	b.P("}")
 	b.P0()
@@ -614,7 +611,7 @@ func (g *Generator) generateFloatDoubleHelpers(b *WriteableBuffer) error {
 	b.P("// Apply sign")
 	b.P("if sign {")
 	b.Indent()
-	b.P("scaled_mantissa := mul(scaled_mantissa, -1)")
+	b.P("scaled_mantissa := sub(0, scaled_mantissa)")
 	b.Unindent()
 	b.P("}")
 	b.P0()
