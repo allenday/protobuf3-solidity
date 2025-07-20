@@ -65,7 +65,7 @@ func (gpg *GoogleProtobufGenerator) generateTimestampDefinition(b *WriteableBuff
 	b.P("// google.protobuf.Timestamp - represents a point in time")
 	b.P("struct Timestamp {")
 	b.Indent()
-	b.P("int64 seconds; // Seconds since Unix epoch")
+	b.P("int64 _seconds; // Seconds since Unix epoch")
 	b.P("int32 nanos;   // Nanoseconds within the second")
 	b.Unindent()
 	b.P("}")

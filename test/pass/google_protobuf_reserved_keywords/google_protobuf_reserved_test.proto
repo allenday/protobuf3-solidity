@@ -1,0 +1,9 @@
+syntax = "proto3";
+
+package google_protobuf_reserved_test;
+
+import "google/protobuf/timestamp.proto";
+
+message TestMessage {
+  google.protobuf.Timestamp created_at = 1;  // This should trigger the seconds field issue
+} 
