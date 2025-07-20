@@ -325,8 +325,11 @@ func (g *Generator) generateFile(protoFile *descriptorpb.FileDescriptorProto) (*
 	// Generate file header
 	fileHeaderGen.GenerateFileHeader(b)
 
-	// Generate imports
-	importManager.GenerateImports(protoFile, b)
+	// Get the generated file name for import path calculations
+	generatedFileName := fileNaming.GenerateOutputFileName(protoFile)
+
+	// Generate imports using the generated file name
+	importManager.GenerateImports(protoFile, generatedFileName, b)
 
 	// Generate package comment
 	packageName := protoFile.GetPackage()

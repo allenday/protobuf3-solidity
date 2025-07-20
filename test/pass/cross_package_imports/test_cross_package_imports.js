@@ -9,7 +9,7 @@ const testCases = [
     name: 'postfiat/v3/messages.sol',
     expectedImports: [
       '@protobuf3-solidity-lib/contracts/ProtobufLib.sol',
-      '../../../a2a/v1/a2a.sol'
+      '../../a2a/v1/a2a.sol'
     ]
   },
   {
@@ -28,8 +28,8 @@ const testCases = [
     name: 'deep/nested/package/test.sol',
     expectedImports: [
       '@protobuf3-solidity-lib/contracts/ProtobufLib.sol',
-      '../../../../a2a/v1/a2a.sol',
-      '../../../../shared/common.sol'
+      '../../../a2a/v1/a2a.sol',
+      '../../../shared/common.sol'
     ]
   }
 ];
