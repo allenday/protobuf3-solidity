@@ -24,6 +24,15 @@ func (lg *LibraryGenerator) GenerateMainLibrary(packageName string, b *Writeable
 	libraryName := lg.packageToLibraryName(packageName)
 	b.P(fmt.Sprintf("library %s {", libraryName))
 	b.Indent()
+	
+	// Add PlaceholderType definition for corrupted descriptors
+	b.P("// PlaceholderType is used when protobuf descriptors have corrupted or empty type names")
+	b.P("struct PlaceholderType {")
+	b.Indent()
+	b.P("// This is a placeholder struct for handling corrupted protobuf descriptors")
+	b.P("bytes corrupted_data;")
+	b.Unindent()
+	b.P("}")
 	b.P0()
 }
 

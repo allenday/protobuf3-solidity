@@ -104,6 +104,7 @@ func (chg *CodecHelperGenerator) generateDecodeFieldFunction(structName string, 
 // generateFieldDecoding generates the decoding logic for a specific field
 func (chg *CodecHelperGenerator) generateFieldDecoding(field *descriptorpb.FieldDescriptorProto, fieldName string, structName string, b *WriteableBuffer) {
 	fieldType := field.GetType()
+	isRepeated := isFieldRepeated(field)
 
 	switch fieldType {
 	case descriptorpb.FieldDescriptorProto_TYPE_STRING:
@@ -116,7 +117,14 @@ func (chg *CodecHelperGenerator) generateFieldDecoding(field *descriptorpb.Field
 		b.P("return (false, pos);")
 		b.Unindent()
 		b.P("}")
-		b.P(fmt.Sprintf("instance.%s = value;", fieldName))
+		if isRepeated {
+			// For repeated fields, we need to append to the array
+			// TODO: Implement proper repeated field handling - for now, just a placeholder
+			b.P("// TODO: Implement repeated field appending")
+			b.P(fmt.Sprintf("// instance.%s.push(value); // This syntax doesn't exist in Solidity", fieldName))
+		} else {
+			b.P(fmt.Sprintf("instance.%s = value;", fieldName))
+		}
 		b.P("pos = new_pos;")
 		b.P("return (true, pos);")
 
@@ -167,6 +175,27 @@ func (chg *CodecHelperGenerator) generateFieldDecoding(field *descriptorpb.Field
 		b.P("uint64 new_pos;")
 		b.P("bytes memory value;")
 		b.P(fmt.Sprintf("(success, new_pos, value) = ProtobufLib.decode_bytes(pos, buf);"))
+		b.P("if (!success) {")
+		b.Indent()
+		b.P("return (false, pos);")
+		b.Unindent()
+		b.P("}")
+		if isRepeated {
+			// For repeated fields, we need to append to the array
+			// TODO: Implement proper repeated field handling - for now, just a placeholder
+			b.P("// TODO: Implement repeated field appending")
+			b.P(fmt.Sprintf("// instance.%s.push(value); // This syntax doesn't exist in Solidity", fieldName))
+		} else {
+			b.P(fmt.Sprintf("instance.%s = value;", fieldName))
+		}
+		b.P("pos = new_pos;")
+		b.P("return (true, pos);")
+
+	case descriptorpb.FieldDescriptorProto_TYPE_FIXED32:
+		b.P("bool success;")
+		b.P("uint64 new_pos;")
+		b.P("uint32 value;")
+		b.P(fmt.Sprintf("(success, new_pos, value) = ProtobufLib.decode_fixed32(pos, buf);"))
 		b.P("if (!success) {")
 		b.Indent()
 		b.P("return (false, pos);")
