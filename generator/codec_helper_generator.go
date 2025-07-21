@@ -109,7 +109,7 @@ func (chg *CodecHelperGenerator) generateFieldDecoding(field *descriptorpb.Field
 	case descriptorpb.FieldDescriptorProto_TYPE_STRING:
 		b.P("bool success;")
 		b.P("uint64 new_pos;")
-		b.P("string value;")
+		b.P("string memory value;")
 		b.P(fmt.Sprintf("(success, new_pos, value) = ProtobufLib.decode_string(pos, buf);"))
 		b.P("if (!success) {")
 		b.Indent()

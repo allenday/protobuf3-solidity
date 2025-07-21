@@ -83,6 +83,40 @@ function testQualifiedStructNames() {
         success = false;
     }
     
+    // Regression test for data location specifiers (fix for missing 'memory' bug)
+    console.log('\nChecking data location specifiers for local variables...');
+    const dataLocationPatterns = [
+        // Must have 'memory' specifier for string local variables
+        /string memory value;/,
+    ];
+    
+    const forbiddenDataLocationPatterns = [
+        // Must NOT have unqualified string declarations in codec functions
+        /function\s+decode_field\([^)]*\)\s+internal\s+pure\s+returns\s*\([^)]*\)\s*\{[^}]*string\s+value;/s,
+    ];
+    
+    dataLocationPatterns.forEach((pattern, index) => {
+        if (pattern.test(solContent)) {
+            console.log(`✓ Data location pattern ${index + 1}: Found correct 'memory' specifier`);
+        } else {
+            console.error(`✗ Data location pattern ${index + 1}: Missing 'memory' specifier`);
+            console.error(`  Pattern: ${pattern.toString()}`);
+            success = false;
+        }
+    });
+    
+    forbiddenDataLocationPatterns.forEach((pattern, index) => {
+        const matches = solContent.match(pattern);
+        if (matches) {
+            console.error(`✗ Forbidden data location pattern ${index + 1}: Found local variable without data location specifier`);
+            console.error(`  Pattern: ${pattern.toString()}`);
+            console.error(`  Match: ${matches[0].substring(0, 100)}...`);
+            success = false;
+        } else {
+            console.log(`✓ Forbidden data location pattern ${index + 1}: No local variables without data location specifiers found`);
+        }
+    });
+    
     if (success) {
         console.log('\n✅ All qualified struct name tests PASSED');
         console.log('✅ Regression test confirms the fix is working correctly');
