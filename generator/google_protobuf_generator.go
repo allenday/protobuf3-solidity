@@ -1,8 +1,6 @@
 package generator
 
 import (
-	"strings"
-
 	"google.golang.org/protobuf/types/descriptorpb"
 )
 
@@ -19,7 +17,7 @@ func (gpg *GoogleProtobufGenerator) GenerateGoogleProtobufTypes(protoFile *descr
 	// Check if this file uses Google protobuf types
 	usesGoogleTypes := false
 	for _, dependency := range protoFile.GetDependency() {
-		if strings.HasPrefix(dependency, "google/protobuf/") {
+		if IsGoogleProtobufDependency(dependency) {
 			usesGoogleTypes = true
 			break
 		}
@@ -29,62 +27,16 @@ func (gpg *GoogleProtobufGenerator) GenerateGoogleProtobufTypes(protoFile *descr
 		return nil
 	}
 
-	// Skip generation if already generated to avoid duplicates
+	// Skip inline generation if already generated to avoid duplicates
+	// The shared library approach handles this at the generator level
 	if alreadyGenerated {
 		return nil
 	}
 
-	// Generate Google protobuf library
-	b.P("// Google protobuf type definitions")
-	b.P("library Google_Protobuf {")
-	b.Indent()
-
-	// Generate struct definitions for commonly used Google protobuf types
-	gpg.generateStructDefinition(b)
-	gpg.generateTimestampDefinition(b)
-	gpg.generateEmptyDefinition(b)
-
-	b.Unindent()
-	b.P("}")
-	b.P0()
-
+	// This method is now only called for inline generation (legacy behavior)
+	// The shared library approach generates the types separately
 	return nil
 }
 
-// generateStructDefinition generates the Struct type definition
-func (gpg *GoogleProtobufGenerator) generateStructDefinition(b *WriteableBuffer) {
-	b.P("// google.protobuf.Struct - represents a structured data value")
-	b.P("struct Struct {")
-	b.Indent()
-	b.P("// Fields map - in practice this would need proper implementation")
-	b.P("// For now, this is a placeholder that allows compilation")
-	b.P("// In a real implementation, this would be a map<string, Value>")
-	b.P("bytes data; // Placeholder for structured data")
-	b.Unindent()
-	b.P("}")
-	b.P0()
-}
-
-// generateTimestampDefinition generates the Timestamp type definition
-func (gpg *GoogleProtobufGenerator) generateTimestampDefinition(b *WriteableBuffer) {
-	b.P("// google.protobuf.Timestamp - represents a point in time")
-	b.P("struct Timestamp {")
-	b.Indent()
-	b.P("int64 _seconds; // Seconds since Unix epoch")
-	b.P("int32 nanos;   // Nanoseconds within the second")
-	b.Unindent()
-	b.P("}")
-	b.P0()
-}
-
-// generateEmptyDefinition generates the Empty type definition
-func (gpg *GoogleProtobufGenerator) generateEmptyDefinition(b *WriteableBuffer) {
-	b.P("// google.protobuf.Empty - represents an empty message")
-	b.P("// Note: Empty structs are not allowed in Solidity, using placeholder")
-	b.P("struct Empty {")
-	b.Indent()
-	b.P("bool _placeholder; // Placeholder field to avoid empty struct compilation error")
-	b.Unindent()
-	b.P("}")
-	b.P0()
-}
+// Legacy methods - no longer used since switching to shared library approach
+// Kept for backward compatibility but not called in current implementation

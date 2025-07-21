@@ -2,7 +2,6 @@ package generator
 
 import (
 	"fmt"
-	"strings"
 
 	"google.golang.org/protobuf/types/descriptorpb"
 )
@@ -115,17 +114,5 @@ func (lg *LibraryGenerator) GenerateCodecLibraries(protoFile *descriptorpb.FileD
 
 // packageToLibraryName converts a protobuf package name to a valid Solidity library name
 func (lg *LibraryGenerator) packageToLibraryName(packageName string) string {
-	// Handle empty package name
-	if len(packageName) == 0 {
-		return "DefaultPackage"
-	}
-
-	// Replace dots with underscores and capitalize
-	parts := strings.Split(packageName, ".")
-	for i, part := range parts {
-		if len(part) > 0 {
-			parts[i] = strings.ToUpper(part[:1]) + part[1:]
-		}
-	}
-	return strings.Join(parts, "_")
+	return PackageToLibraryName(packageName)
 }

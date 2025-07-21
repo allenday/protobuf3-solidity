@@ -399,12 +399,8 @@ func toSolMessageOrEnumName(field *descriptorpb.FieldDescriptorProto) (string, e
 			typeNamePart := parts[len(parts)-1]
 
 			// Convert package parts to library name format
-			for i, part := range packageParts {
-				if len(part) > 0 {
-					packageParts[i] = strings.ToUpper(part[:1]) + part[1:]
-				}
-			}
-			libraryName := strings.Join(packageParts, "_")
+			packageName := strings.Join(packageParts, ".")
+			libraryName := PackageToLibraryName(packageName)
 
 			// Return library-qualified type name
 			result := fmt.Sprintf("%s.%s", libraryName, typeNamePart)
