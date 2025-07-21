@@ -1,13 +1,9 @@
 package generator
 
-import (
-	"fmt"
-	"path/filepath"
-)
-
 // SharedGoogleProtobufGenerator handles generation of shared Google protobuf type definitions
 type SharedGoogleProtobufGenerator struct {
 	outputDir string
+	generatedContent string
 }
 
 // NewSharedGoogleProtobufGenerator creates a new shared Google protobuf generator
@@ -19,15 +15,6 @@ func NewSharedGoogleProtobufGenerator(outputDir string) *SharedGoogleProtobufGen
 
 // GenerateSharedGoogleProtobuf generates a shared Google protobuf library file
 func (sgpg *SharedGoogleProtobufGenerator) GenerateSharedGoogleProtobuf() error {
-	// Create the shared library file path
-	sharedFilePath := filepath.Join(sgpg.outputDir, "google", "protobuf", "google_protobuf.sol")
-
-	// Create the directory structure
-	sharedDir := filepath.Dir(sharedFilePath)
-	if err := createDirectoryIfNotExists(sharedDir); err != nil {
-		return fmt.Errorf("failed to create shared directory: %w", err)
-	}
-
 	// Generate the shared library content
 	b := NewWriteableBuffer()
 
@@ -45,70 +32,21 @@ func (sgpg *SharedGoogleProtobufGenerator) GenerateSharedGoogleProtobuf() error 
 	b.P("library Google_Protobuf {")
 	b.Indent()
 
-	// Generate Struct definition
-	sgpg.generateStructDefinition(b)
-
-	// Generate Timestamp definition
-	sgpg.generateTimestampDefinition(b)
-
-	// Generate Empty definition
-	sgpg.generateEmptyDefinition(b)
+	// Generate struct definitions for commonly used Google protobuf types
+	googleTypes := NewGoogleProtobufTypes()
+	googleTypes.GenerateAllTypes(b)
 
 	b.Unindent()
 	b.P("}")
 
-	// Write the shared file
-	return writeFile(sharedFilePath, b.String())
-}
-
-// generateStructDefinition generates the Struct type definition
-func (sgpg *SharedGoogleProtobufGenerator) generateStructDefinition(b *WriteableBuffer) {
-	b.P("// google.protobuf.Struct - represents a structured data value")
-	b.P("struct Struct {")
-	b.Indent()
-	b.P("// Fields map - in practice this would need proper implementation")
-	b.P("// For now, this is a placeholder that allows compilation")
-	b.P("// In a real implementation, this would be a map<string, Value>")
-	b.P("bytes data; // Placeholder for structured data")
-	b.Unindent()
-	b.P("}")
-	b.P0()
-}
-
-// generateTimestampDefinition generates the Timestamp type definition
-func (sgpg *SharedGoogleProtobufGenerator) generateTimestampDefinition(b *WriteableBuffer) {
-	b.P("// google.protobuf.Timestamp - represents a point in time")
-	b.P("struct Timestamp {")
-	b.Indent()
-	b.P("int64 _seconds; // Seconds since Unix epoch")
-	b.P("int32 nanos;   // Nanoseconds within the second")
-	b.Unindent()
-	b.P("}")
-	b.P0()
-}
-
-// generateEmptyDefinition generates the Empty type definition
-func (sgpg *SharedGoogleProtobufGenerator) generateEmptyDefinition(b *WriteableBuffer) {
-	b.P("// google.protobuf.Empty - represents an empty message")
-	b.P("// Note: Empty structs are not allowed in Solidity, using placeholder")
-	b.P("struct Empty {")
-	b.Indent()
-	b.P("bool _placeholder; // Placeholder field to avoid empty struct compilation error")
-	b.Unindent()
-	b.P("}")
-	b.P0()
-}
-
-// Helper function to create directory if it doesn't exist
-func createDirectoryIfNotExists(dir string) error {
-	// This is a simplified implementation
-	// In a real implementation, you would use os.MkdirAll
+	// Store the generated content
+	sgpg.generatedContent = b.String()
 	return nil
 }
 
-// Helper function to write file
-func writeFile(path string, content string) error {
-	// This is a simplified implementation
-	// In a real implementation, you would use os.WriteFile
-	return nil
+// GetGeneratedContent returns the generated content
+func (sgpg *SharedGoogleProtobufGenerator) GetGeneratedContent() string {
+	return sgpg.generatedContent
 }
+
+
