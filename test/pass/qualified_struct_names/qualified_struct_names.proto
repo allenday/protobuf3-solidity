@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+// Test to ensure codec functions use fully-qualified struct names
+package qualified.test;
+
+message TestMessage {
+    string name = 1;
+    int32 value = 2;
+    NestedMessage nested = 3;
+}
+
+message NestedMessage {
+    string data = 1;
+}
