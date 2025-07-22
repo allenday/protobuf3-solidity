@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+// Test case to verify Fixed32 wire type is handled correctly
+// The bug report claimed that Fixed32 doesn't exist in ProtobufLib.WireType
+package fixed32_test;
+
+message Fixed32TestMessage {
+    // Test all Fixed32 wire type fields
+    fixed32 fixed_field = 1;
+    sfixed32 sfixed_field = 2;
+    float float_field = 3;
+    
+    // Mix with other wire types to ensure proper handling
+    uint32 varint_field = 4;
+    fixed64 fixed64_field = 5;
+    string length_delimited_field = 6;
+    
+    // Repeated fixed32 fields (packed is default in proto3)
+    repeated fixed32 repeated_fixed = 7 [packed = true];
+    repeated float repeated_float = 8 [packed = true];
+}

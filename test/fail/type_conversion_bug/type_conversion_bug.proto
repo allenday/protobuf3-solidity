@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+// Test case that should trigger the type conversion bug in decode_bytes
+package type_conversion_bug;
+
+message BuggyMessage {
+    // This bytes field should trigger the type conversion error
+    // The bug is that the generator expects decode_bytes to return (bool, uint64, bytes memory)
+    // but it actually returns (bool, uint64, uint64)
+    bytes binary_field = 1;
+    string text_field = 2;
+}
