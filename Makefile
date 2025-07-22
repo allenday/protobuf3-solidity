@@ -40,3 +40,6 @@ $(TESTS_FAILING): build
 test-cross-package-imports: build
 	cd test/pass/cross_package_imports && $(PROTOC) --plugin $(CURDIR)/$(BIN_DIR)/$(TARGET_GEN_SOL) --sol_out=. -I . a2a/v1/a2a.proto shared/common.proto postfiat/v3/messages.proto deep/nested/package/test.proto
 	cd test/pass/cross_package_imports && node test_cross_package_imports.js
+
+clean:
+	rm -rf $(BIN_DIR)

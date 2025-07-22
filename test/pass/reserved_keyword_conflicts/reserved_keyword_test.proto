@@ -1,0 +1,9 @@
+syntax = "proto3";
+
+package reserved_keyword_test;
+
+message TestMessage {
+  string seconds = 1;  // 'seconds' is a reserved keyword in Solidity
+  uint32 return = 2;   // 'return' is a reserved keyword in Solidity
+  bool public = 3;     // 'public' is a reserved keyword in Solidity
+} 

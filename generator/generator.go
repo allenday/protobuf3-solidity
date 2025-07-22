@@ -95,6 +95,9 @@ type Generator struct {
 	allowEmptyPackedArrays      bool
 	allowNonMonotonicFields     bool
 	protobufLibImportPath       string // Import path for ProtobufLib.sol
+
+	// Track Google protobuf generation to avoid duplicates
+	googleProtobufGenerated bool
 }
 
 // New initializes a new Generator.
@@ -218,6 +221,42 @@ func (g *Generator) Generate() (*pluginpb.CodeGeneratorResponse, error) {
 	// Build a global registry of all messages for type resolution
 	g.buildGlobalMessageRegistry(protoFiles)
 
+	// Check if any files use Google protobuf types and generate shared library if needed
+	usesGoogleTypes := false
+	for _, protoFile := range protoFiles {
+		if _, ok := fileToGenerateSet[protoFile.GetName()]; !ok {
+			continue
+		}
+		for _, dependency := range protoFile.GetDependency() {
+			if IsGoogleProtobufDependency(dependency) {
+				usesGoogleTypes = true
+				break
+			}
+		}
+		if usesGoogleTypes {
+			break
+		}
+	}
+
+	// Generate shared Google protobuf library if any file uses Google types
+	if usesGoogleTypes {
+		sharedGen := NewSharedGoogleProtobufGenerator("")
+		if err := sharedGen.GenerateSharedGoogleProtobuf(g.protobufLibImportPath); err != nil {
+			return nil, fmt.Errorf("failed to generate shared Google protobuf library: %w", err)
+		}
+		
+		// Add the shared library file to the response
+		sharedFilePath := "google/protobuf/google_protobuf.sol"
+		sharedContent := sharedGen.GetGeneratedContent()
+		response.File = append(response.File, &pluginpb.CodeGeneratorResponse_File{
+			Name:    &sharedFilePath,
+			Content: &sharedContent,
+		})
+		
+		// Mark that Google protobuf types have been generated globally
+		g.googleProtobufGenerated = true
+	}
+
 	log.Printf("DEBUG: Processing %d proto files", len(protoFiles))
 	for i, protoFile := range protoFiles {
 		if _, ok := fileToGenerateSet[protoFile.GetName()]; !ok {
@@ -284,7 +323,7 @@ func (g *Generator) generateFile(protoFile *descriptorpb.FileDescriptorProto) (*
 	// Skip Google protobuf standard library files and Google API files
 	// (they use proto2 or have complex nested structures)
 	fileName := protoFile.GetName()
-	if strings.HasPrefix(fileName, "google/protobuf/") || strings.HasPrefix(fileName, "google/api/") {
+	if IsGoogleDependency(fileName) {
 		// Skip these files as they are part of the Google standard library
 		// and may use proto2 syntax or have complex nested structures
 		return nil, nil
@@ -325,6 +364,7 @@ func (g *Generator) generateFile(protoFile *descriptorpb.FileDescriptorProto) (*
 	importManager := NewImportManager(g.protobufLibImportPath)
 	libraryGen := NewLibraryGenerator(g.generateFlag)
 	fileNaming := NewFileNaming()
+	googleProtobufGen := NewGoogleProtobufGenerator()
 
 	// Generate file header
 	fileHeaderGen.GenerateFileHeader(b)
@@ -334,6 +374,16 @@ func (g *Generator) generateFile(protoFile *descriptorpb.FileDescriptorProto) (*
 
 	// Generate imports using the generated file name
 	importManager.GenerateImports(protoFile, generatedFileName, b)
+
+	// Generate Google protobuf types if needed
+	err = googleProtobufGen.GenerateGoogleProtobufTypes(protoFile, b, g.googleProtobufGenerated)
+	if err == nil {
+		// Mark as generated if successful
+		g.googleProtobufGenerated = true
+	}
+	if err != nil {
+		return nil, err
+	}
 
 	// Generate package comment
 	packageName := protoFile.GetPackage()
@@ -419,9 +469,9 @@ func (g *Generator) resolveTypeName(typeName string) (string, error) {
 	log.Printf("DEBUG: resolveTypeName called with typeName: '%s'", typeName)
 
 	if len(typeName) == 0 {
-		log.Printf("WARNING: Empty type name passed to resolveTypeName, using default type")
-		// Workaround for corrupted descriptors: use a default type name
-		return "UnknownType", nil
+		log.Printf("INFO: Empty type name detected, using placeholder type for corrupted descriptor")
+		// Workaround for corrupted descriptors: use a placeholder type name
+		return "PlaceholderType", nil
 	}
 
 	// Remove leading dot
@@ -440,12 +490,8 @@ func (g *Generator) resolveTypeName(typeName string) (string, error) {
 			typeNamePart := parts[len(parts)-1]
 
 			// Convert package parts to library name format
-			for i, part := range packageParts {
-				if len(part) > 0 {
-					packageParts[i] = strings.ToUpper(part[:1]) + part[1:]
-				}
-			}
-			libraryName := strings.Join(packageParts, "_")
+			packageName := strings.Join(packageParts, ".")
+			libraryName := PackageToLibraryName(packageName)
 
 			// Return library-qualified type name
 			result := fmt.Sprintf("%s.%s", libraryName, typeNamePart)

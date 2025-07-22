@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+// Test case to verify decode_bytes type conversion is handled correctly
+// The bug report claimed that decode_bytes returns (bool, uint64, uint64) 
+// but the generator expects (bool, uint64, bytes memory)
+package decode_bytes_bug;
+
+message BytesTestMessage {
+    // Various bytes fields to test decode_bytes conversion
+    bytes single_bytes_field = 1;
+    repeated bytes repeated_bytes_field = 2;
+    
+    // Mix with other types to ensure proper handling
+    string text_field = 3;
+    uint32 number_field = 4;
+    
+    // Nested message with bytes
+    NestedBytesMessage nested = 5;
+}
+
+message NestedBytesMessage {
+    bytes nested_bytes = 1;
+    repeated bytes nested_repeated_bytes = 2;
+}

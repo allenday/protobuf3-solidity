@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+// Test case to verify import path consistency
+// This should generate both regular files and google protobuf shared files
+// with the same import path for ProtobufLib
+package import_test;
+
+message ImportTestMessage {
+    string name = 1;
+    google.protobuf.Timestamp created_at = 2;
+    bytes data = 3;
+}

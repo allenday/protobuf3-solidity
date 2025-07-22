@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+// Test to reproduce and fix critical type conversion bugs
+package type_conversion_test;
+
+message TestMessage {
+    // Test array field assignments (type conversion bug)
+    repeated string string_array = 1;
+    repeated bytes bytes_array = 2;
+    
+    // Test various field types that cause conversion issues
+    bytes binary_data = 3;
+    string text_data = 4;
+    
+    // Test fixed32 wire type (missing enum bug)
+    fixed32 fixed_value = 5;
+    
+    // Test nested message (for struct name qualification)
+    NestedMessage nested = 6;
+}
+
+message NestedMessage {
+    string content = 1;
+}

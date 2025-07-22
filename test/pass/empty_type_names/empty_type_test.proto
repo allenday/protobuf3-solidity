@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package empty_type_test;
+
+message TestMessage {
+  string field1 = 1;
+  uint32 field2 = 2;
+}
+
+// Test edge case: message with very short name
+message A {
+  string short_name_field = 1;
+} 

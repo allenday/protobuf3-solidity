@@ -491,15 +491,24 @@ func (g *Generator) generateMessageCodec(descriptor *descriptorpb.DescriptorProt
 
 	// Only generate codec functions if we have fields
 	if len(fields) > 0 {
+		// Generate helper functions first
+		codecHelperGen := NewCodecHelperGenerator()
+		// Create qualified struct name for codec functions
+		qualifiedStructName := PackageToLibraryName(packageName) + "." + structName
+		err := codecHelperGen.GenerateCodecHelpers(qualifiedStructName, fields, fieldNameMap, b)
+		if err != nil {
+			return err
+		}
+
 		if g.generateFlag == generateFlagAll || g.generateFlag == generateFlagDecoder {
-			err := g.generateMessageDecoder(structName, fields, fieldNameMap, b)
+			err := g.generateMessageDecoder(qualifiedStructName, fields, fieldNameMap, b)
 			if err != nil {
 				return err
 			}
 		}
 
 		if g.generateFlag == generateFlagAll || g.generateFlag == generateFlagEncoder {
-			err := g.generateMessageEncoder(structName, fields, fieldNameMap, b)
+			err := g.generateMessageEncoder(qualifiedStructName, fields, fieldNameMap, b)
 			if err != nil {
 				return err
 			}

@@ -28,9 +28,24 @@ func (im *ImportManager) GenerateImports(protoFile *descriptorpb.FileDescriptorP
 	importedFiles := make(map[string]bool)
 	importedFiles[im.dependencyToImportPath("ProtobufLib", generatedFileName)] = true
 
+	// Check if this file uses Google protobuf types and add shared library import
+	usesGoogleTypes := false
+	for _, dependency := range protoFile.GetDependency() {
+		if IsGoogleProtobufDependency(dependency) {
+			usesGoogleTypes = true
+			break
+		}
+	}
+
+	if usesGoogleTypes {
+		googleProtobufImportPath := im.calculateRelativePath(generatedFileName, "google/protobuf/google_protobuf") + ".sol"
+		b.P(fmt.Sprintf("import \"%s\";", googleProtobufImportPath))
+		importedFiles[googleProtobufImportPath] = true
+	}
+
 	// Generate imports for dependencies
 	for _, dependency := range protoFile.GetDependency() {
-		if strings.HasPrefix(dependency, "google/protobuf/") || strings.HasPrefix(dependency, "google/api/") {
+		if IsGoogleDependency(dependency) {
 			continue
 		}
 		importPath := im.dependencyToImportPath(dependency, generatedFileName)

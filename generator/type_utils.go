@@ -12,45 +12,45 @@ import (
 
 // List of Solidity reserved keywords that need to be sanitized
 var solidityReservedKeywords = map[string]bool{
-	"abstract":     true,
-	"address":      true,
-	"after":        true,
-	"alias":        true,
-	"anonymous":    true,
-	"apply":        true,
-	"assembly":     true,
-	"auto":         true,
-	"bool":         true,
-	"break":        true,
-	"byte":         true,
-	"bytes":        true,
-	"calldata":     true,
-	"case":         true,
-	"catch":        true,
-	"constant":     true,
-	"constructor":  true,
-	"continue":     true,
-	"contract":     true,
-	"copyof":       true,
-	"days":         true,
-	"default":      true,
-	"define":       true,
-	"delete":       true,
-	"do":           true,
-	"else":         true,
-	"emit":         true,
-	"enum":         true,
-	"ether":        true,
-	"event":        true,
-	"external":     true,
-	"fallback":     true,
-	"false":        true,
-	"final":        true,
-	"finney":       true,
-	"fixed":        true,
-	"for":          true,
-	"from":         true,
-	"function":     true,
+	"abstract":    true,
+	"address":     true,
+	"after":       true,
+	"alias":       true,
+	"anonymous":   true,
+	"apply":       true,
+	"assembly":    true,
+	"auto":        true,
+	"bool":        true,
+	"break":       true,
+	"byte":        true,
+	"bytes":       true,
+	"calldata":    true,
+	"case":        true,
+	"catch":       true,
+	"constant":    true,
+	"constructor": true,
+	"continue":    true,
+	"contract":    true,
+	"copyof":      true,
+	"days":        true,
+	"default":     true,
+	"define":      true,
+	"delete":      true,
+	"do":          true,
+	"else":        true,
+	"emit":        true,
+	"enum":        true,
+	"ether":       true,
+	"event":       true,
+	"external":    true,
+	"fallback":    true,
+	"false":       true,
+	"final":       true,
+	"finney":      true,
+	"fixed":       true,
+	"for":         true,
+	"from":        true,
+	"function":    true,
 	"gwei":        true,
 	"hex":         true,
 	"hours":       true,
@@ -150,24 +150,24 @@ func sanitizeKeyword(name string) string {
 	if strings.HasPrefix(name, "_") {
 		return name
 	}
-	
+
 	// Check if it's a reserved keyword
 	if solidityReservedKeywords[name] {
 		return "_" + name
 	}
-	
+
 	// Check if it's a numeric type (uint8, int256, etc.)
 	if strings.HasPrefix(name, "uint") || strings.HasPrefix(name, "int") {
 		if _, err := strconv.Atoi(name[4:]); err == nil {
 			return "_" + name
 		}
 	}
-	
+
 	// Check if it starts with a number
 	if len(name) > 0 && name[0] >= '0' && name[0] <= '9' {
 		return "_" + name
 	}
-	
+
 	return name
 }
 
@@ -357,7 +357,7 @@ func toSolWireType(field *descriptorpb.FieldDescriptorProto) (string, error) {
 	case descriptorpb.FieldDescriptorProto_TYPE_FIXED64,
 		descriptorpb.FieldDescriptorProto_TYPE_SFIXED64,
 		descriptorpb.FieldDescriptorProto_TYPE_DOUBLE:
-		return "ProtobufLib.WireType.Fixed64", nil
+		return "ProtobufLib.WireType.Bits64", nil
 	case descriptorpb.FieldDescriptorProto_TYPE_STRING,
 		descriptorpb.FieldDescriptorProto_TYPE_BYTES,
 		descriptorpb.FieldDescriptorProto_TYPE_MESSAGE:
@@ -365,7 +365,7 @@ func toSolWireType(field *descriptorpb.FieldDescriptorProto) (string, error) {
 	case descriptorpb.FieldDescriptorProto_TYPE_FIXED32,
 		descriptorpb.FieldDescriptorProto_TYPE_SFIXED32,
 		descriptorpb.FieldDescriptorProto_TYPE_FLOAT:
-		return "ProtobufLib.WireType.Fixed32", nil
+		return "ProtobufLib.WireType.Bits32", nil
 	default:
 		return "", errors.New("unsupported field type: " + fieldType.String())
 	}
@@ -376,19 +376,19 @@ func toSolMessageOrEnumName(field *descriptorpb.FieldDescriptorProto) (string, e
 	// Names take the form ".name", so remove the leading period
 	typeName := field.GetTypeName()
 	log.Printf("DEBUG: toSolMessageOrEnumName called for field '%s' with typeName: '%s'", field.GetName(), typeName)
-	
+
 	if len(typeName) == 0 {
-		log.Printf("WARNING: Empty type name for field '%s', using default type", field.GetName())
-		// Workaround for corrupted descriptors: use a default type name
-		return "UnknownType", nil
+		log.Printf("INFO: Empty type name for field '%s', using placeholder type for corrupted descriptor", field.GetName())
+		// Workaround for corrupted descriptors: use a placeholder type name
+		return "PlaceholderType", nil
 	}
-	
+
 	// Remove leading dot
 	if typeName[0] == '.' {
 		typeName = typeName[1:]
 		log.Printf("DEBUG: Removed leading dot, typeName now: '%s'", typeName)
 	}
-	
+
 	// Handle package-qualified type names
 	// Format: "package.name.TypeName" -> "Package_Name.TypeName"
 	if strings.Contains(typeName, ".") {
@@ -397,22 +397,18 @@ func toSolMessageOrEnumName(field *descriptorpb.FieldDescriptorProto) (string, e
 			// Convert package name to library name format
 			packageParts := parts[:len(parts)-1]
 			typeNamePart := parts[len(parts)-1]
-			
+
 			// Convert package parts to library name format
-			for i, part := range packageParts {
-				if len(part) > 0 {
-					packageParts[i] = strings.ToUpper(part[:1]) + part[1:]
-				}
-			}
-			libraryName := strings.Join(packageParts, "_")
-			
+			packageName := strings.Join(packageParts, ".")
+			libraryName := PackageToLibraryName(packageName)
+
 			// Return library-qualified type name
 			result := fmt.Sprintf("%s.%s", libraryName, typeNamePart)
 			log.Printf("DEBUG: Package-qualified type resolved to: '%s'", result)
 			return result, nil
 		}
 	}
-	
+
 	log.Printf("DEBUG: Simple type name resolved to: '%s'", typeName)
 	return typeName, nil
-} 
+}
