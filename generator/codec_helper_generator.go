@@ -52,11 +52,11 @@ func (chg *CodecHelperGenerator) generateCheckKeyFunction(structName string, fie
 		case descriptorpb.FieldDescriptorProto_TYPE_FIXED64,
 			descriptorpb.FieldDescriptorProto_TYPE_SFIXED64,
 			descriptorpb.FieldDescriptorProto_TYPE_DOUBLE:
-			b.P("return wire_type == ProtobufLib.WireType.Fixed64;")
+			b.P("return wire_type == ProtobufLib.WireType.Bits64;")
 		case descriptorpb.FieldDescriptorProto_TYPE_FIXED32,
 			descriptorpb.FieldDescriptorProto_TYPE_SFIXED32,
 			descriptorpb.FieldDescriptorProto_TYPE_FLOAT:
-			b.P("return wire_type == ProtobufLib.WireType.Fixed32;")
+			b.P("return wire_type == ProtobufLib.WireType.Bits32;")
 		case descriptorpb.FieldDescriptorProto_TYPE_STRING,
 			descriptorpb.FieldDescriptorProto_TYPE_BYTES,
 			descriptorpb.FieldDescriptorProto_TYPE_MESSAGE:
@@ -173,11 +173,17 @@ func (chg *CodecHelperGenerator) generateFieldDecoding(field *descriptorpb.Field
 	case descriptorpb.FieldDescriptorProto_TYPE_BYTES:
 		b.P("bool success;")
 		b.P("uint64 new_pos;")
-		b.P("bytes memory value;")
-		b.P(fmt.Sprintf("(success, new_pos, value) = ProtobufLib.decode_bytes(pos, buf);"))
+		b.P("uint64 length;")
+		b.P(fmt.Sprintf("(success, new_pos, length) = ProtobufLib.decode_bytes(pos, buf);"))
 		b.P("if (!success) {")
 		b.Indent()
 		b.P("return (false, pos);")
+		b.Unindent()
+		b.P("}")
+		b.P("bytes memory value = new bytes(length);")
+		b.P("for (uint64 i = 0; i < length; i++) {")
+		b.Indent()
+		b.P("value[i] = buf[new_pos + i];")
 		b.Unindent()
 		b.P("}")
 		if isRepeated {
@@ -188,7 +194,7 @@ func (chg *CodecHelperGenerator) generateFieldDecoding(field *descriptorpb.Field
 		} else {
 			b.P(fmt.Sprintf("instance.%s = value;", fieldName))
 		}
-		b.P("pos = new_pos;")
+		b.P("pos = new_pos + length;")
 		b.P("return (true, pos);")
 
 	case descriptorpb.FieldDescriptorProto_TYPE_FIXED32:

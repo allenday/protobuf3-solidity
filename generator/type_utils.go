@@ -357,7 +357,7 @@ func toSolWireType(field *descriptorpb.FieldDescriptorProto) (string, error) {
 	case descriptorpb.FieldDescriptorProto_TYPE_FIXED64,
 		descriptorpb.FieldDescriptorProto_TYPE_SFIXED64,
 		descriptorpb.FieldDescriptorProto_TYPE_DOUBLE:
-		return "ProtobufLib.WireType.Fixed64", nil
+		return "ProtobufLib.WireType.Bits64", nil
 	case descriptorpb.FieldDescriptorProto_TYPE_STRING,
 		descriptorpb.FieldDescriptorProto_TYPE_BYTES,
 		descriptorpb.FieldDescriptorProto_TYPE_MESSAGE:
@@ -365,7 +365,7 @@ func toSolWireType(field *descriptorpb.FieldDescriptorProto) (string, error) {
 	case descriptorpb.FieldDescriptorProto_TYPE_FIXED32,
 		descriptorpb.FieldDescriptorProto_TYPE_SFIXED32,
 		descriptorpb.FieldDescriptorProto_TYPE_FLOAT:
-		return "ProtobufLib.WireType.Fixed32", nil
+		return "ProtobufLib.WireType.Bits32", nil
 	default:
 		return "", errors.New("unsupported field type: " + fieldType.String())
 	}

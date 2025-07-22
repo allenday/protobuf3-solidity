@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+// Test case that reproduces the actual decode_bytes API mismatch bug
+// ProtobufLib.decode_bytes() returns (bool, uint64, uint64) - size only
+// But generator expects (bool, uint64, bytes memory) - actual bytes
+package decode_bytes_api_mismatch;
+
+message ApiMismatchMessage {
+    // This bytes field will trigger the decode_bytes bug
+    // Generator will create: (success, new_pos, value) = ProtobufLib.decode_bytes(pos, buf)
+    // Where value is declared as: bytes memory value
+    // But decode_bytes actually returns: (bool, uint64, uint64)
+    bytes problematic_field = 1;
+    
+    // Additional fields to make this realistic
+    string text_field = 2;
+    repeated bytes repeated_bytes_field = 3;
+}
