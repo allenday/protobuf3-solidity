@@ -1,5 +1,9 @@
 package generator
 
+import (
+	"fmt"
+)
+
 // SharedGoogleProtobufGenerator handles generation of shared Google protobuf type definitions
 type SharedGoogleProtobufGenerator struct {
 	outputDir string
@@ -14,7 +18,7 @@ func NewSharedGoogleProtobufGenerator(outputDir string) *SharedGoogleProtobufGen
 }
 
 // GenerateSharedGoogleProtobuf generates a shared Google protobuf library file
-func (sgpg *SharedGoogleProtobufGenerator) GenerateSharedGoogleProtobuf() error {
+func (sgpg *SharedGoogleProtobufGenerator) GenerateSharedGoogleProtobuf(protobufLibImportPath string) error {
 	// Generate the shared library content
 	b := NewWriteableBuffer()
 
@@ -24,7 +28,7 @@ func (sgpg *SharedGoogleProtobufGenerator) GenerateSharedGoogleProtobuf() error 
 	b.P("pragma solidity ^0.8.19;")
 	b.P0()
 
-	b.P("import \"@protobuf3-solidity-lib/contracts/ProtobufLib.sol\";")
+	b.P(fmt.Sprintf("import \"%s\";", protobufLibImportPath))
 	b.P0()
 
 	// Generate shared Google protobuf library

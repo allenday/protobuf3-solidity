@@ -241,7 +241,7 @@ func (g *Generator) Generate() (*pluginpb.CodeGeneratorResponse, error) {
 	// Generate shared Google protobuf library if any file uses Google types
 	if usesGoogleTypes {
 		sharedGen := NewSharedGoogleProtobufGenerator("")
-		if err := sharedGen.GenerateSharedGoogleProtobuf(); err != nil {
+		if err := sharedGen.GenerateSharedGoogleProtobuf(g.protobufLibImportPath); err != nil {
 			return nil, fmt.Errorf("failed to generate shared Google protobuf library: %w", err)
 		}
 		
