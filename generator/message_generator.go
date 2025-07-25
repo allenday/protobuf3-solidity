@@ -464,6 +464,9 @@ func (g *Generator) generateMessageStruct(descriptor *descriptorpb.DescriptorPro
 				b.P(fmt.Sprintf("%s%s %s;", fieldType, arrayStr, fieldName))
 			}
 		}
+	} else {
+		// Add placeholder field for empty struct (Solidity 0.8.19+ requirement)
+		b.P("bool _placeholder; // Placeholder field to avoid empty struct compilation error")
 	}
 
 	b.Unindent()
